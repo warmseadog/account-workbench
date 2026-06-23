@@ -1,0 +1,30 @@
+{
+  "name": "account-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/electron-main.js",
+  "scripts": {
+    "dev": "node scripts/dev-electron.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "build:main": "tsc -p tsconfig.node.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer"
+  },
+  "dependencies": {
+    "electron": "^39.2.7",
+    "playwright": "^1.57.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.1",
+    "@types/node": "^24.10.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "vitest": "^4.0.15"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+backups/
+.DS_Store
+*.log
+coverage/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
