@@ -5,7 +5,10 @@ import type { LoginRunContext } from "../src/main/runs/login-runner";
 class FakeSession implements BrowserSession {
   filled: Array<{ locator: string; value: string }> = [];
   clicked: string[] = [];
+  focusedLocators: string[] = [];
+  focusTimeouts: Array<number | undefined> = [];
   manualAfterLoginClick = false;
+  requireFocusBeforeFill = false;
 
   constructor(
     private current: string,
@@ -23,9 +26,17 @@ class FakeSession implements BrowserSession {
     this.current = url;
   }
 
+  async focusLocator(locator: string, timeoutMs?: number): Promise<void> {
+    this.focusedLocators.push(locator);
+    this.focusTimeouts.push(timeoutMs);
+  }
+
   async fill(locator: string, value: string): Promise<void> {
     if (this.throwOnFillLocators.has(locator)) {
       throw new Error(`Locator not found: ${locator}`);
+    }
+    if (this.requireFocusBeforeFill && !this.focusedLocators.includes(locator)) {
+      throw new Error(`Locator is on a different page: ${locator}`);
     }
     this.filled.push({ locator, value });
   }
@@ -148,6 +159,17 @@ describe("LoginRunner", () => {
     expect(JSON.stringify(run.steps)).not.toContain("secret-password");
   });
 
+  it("treats Chrome startup pages as blank and navigates to the configured login URL", async () => {
+    const browser = new FakeBrowserController("chrome://newtab/", "manual");
+    const runner = new LoginRunner(browser);
+
+    const run = await runner.run(context());
+
+    expect(run.status).toBe("manual_handoff");
+    expect(browser.session.filled).toHaveLength(2);
+    expect(await browser.session.currentUrl()).toBe("https://example.com/login");
+  });
+
   it("moves captcha or 2FA-like states into manual handoff", async () => {
     const browser = new FakeBrowserController("https://example.com/login", "manual");
     const runner = new LoginRunner(browser);
@@ -236,6 +258,46 @@ describe("LoginRunner", () => {
     ]);
     expect(JSON.stringify(run.steps)).not.toContain("owner@gmail.com");
     expect(JSON.stringify(run.steps)).not.toContain("google-password");
+  });
+
+  it("focuses the OAuth page before filling the Google username field", async () => {
+    const browser = new FakeBrowserController(
+      "about:blank",
+      "manual",
+      new Set(["button:has-text('Google')", "input[type=email]", "input[type=password]"])
+    );
+    browser.session.requireFocusBeforeFill = true;
+    const runner = new LoginRunner(browser);
+    const input = context();
+    input.platform = {
+      ...input.platform,
+      loginUrl: "https://www.dola.com/chat/?from_logout=1",
+      allowedOrigins: ["https://www.dola.com", "https://accounts.google.com"]
+    };
+    input.adapter = {
+      ...input.adapter,
+      authMode: "flow_password",
+      usernameLocator: "",
+      passwordLocator: "",
+      submitLocator: "",
+      flowSteps: [
+        { type: "click", locator: "button:has-text('Google')" },
+        { type: "fill_username", locator: "input[type=email]" },
+        { type: "click", locator: "#identifierNext" },
+        { type: "fill_password", locator: "input[type=password]" }
+      ]
+    };
+    input.credentials = {
+      username: "owner@gmail.com",
+      password: "google-password"
+    };
+
+    const run = await runner.run(input);
+
+    expect(run.status).toBe("manual_handoff");
+    expect(browser.session.focusedLocators).toContain("input[type=email]");
+    expect(browser.session.focusTimeouts).toContain(5_000);
+    expect(browser.session.filled).toContainEqual({ locator: "input[type=email]", value: "owner@gmail.com" });
   });
 
   it("records redacted progress after filling username, password, and clicking confirm", async () => {

@@ -6,6 +6,7 @@ import type { ProfileManager } from "../profiles/profile-manager.js";
 import type { SqliteRow, SqliteStore } from "../storage/sqlite-store.js";
 import type {
   Account,
+  AccountSecretMetadata,
   AccountSecrets,
   AccountStatus,
   LoginAuthMode,
@@ -28,6 +29,7 @@ export interface CreateAccountInput {
   displayName: string;
   username: string;
   password?: string;
+  secretMeta?: AccountSecretMetadata;
   tags?: string[];
 }
 
@@ -69,6 +71,12 @@ export interface AccountSummary {
   updatedAt: string;
 }
 
+export interface AccountDetail extends AccountSummary {
+  username: string;
+  password?: string;
+  secretMeta: AccountSecretMetadata;
+}
+
 interface PlatformRow extends SqliteRow {
   id: string;
   name: string;
@@ -86,6 +94,7 @@ interface AccountRow extends SqliteRow {
   display_name: string;
   username_enc: string;
   password_enc: string;
+  secret_meta_enc: string;
   tags: string;
   profile_id: string;
   status: AccountStatus;
@@ -207,6 +216,11 @@ export class WorkbenchService {
     return this.requirePlatform(platformId);
   }
 
+  deletePlatform(platformId: string): void {
+    this.requirePlatform(platformId);
+    this.store.run("DELETE FROM platforms WHERE id = :id", { id: platformId });
+  }
+
   saveLoginAdapter(input: SaveLoginAdapterInput): LoginAdapter {
     LoginAdapterRules.validateSelectors(input);
     const platform = this.requirePlatform(input.platformId);
@@ -309,6 +323,9 @@ export class WorkbenchService {
         if (!existing.password_enc) {
           this.updateAccountPassword(existing.id, row.password);
         }
+        if (row.secretMeta) {
+          this.updateAccountSecretMeta(existing.id, row.secretMeta);
+        }
         skippedDuplicates += 1;
         continue;
       }
@@ -319,6 +336,7 @@ export class WorkbenchService {
         displayName: `Dola Google 账号 ${String(imported).padStart(3, "0")}`,
         username: row.username,
         password: row.password,
+        secretMeta: row.secretMeta,
         tags: ["dola", "google", "imported"]
       });
       existingAccounts.set(normalizedUsername, this.requireAccountRow(account.id));
@@ -365,6 +383,7 @@ export class WorkbenchService {
       displayName: input.displayName.trim(),
       usernameEnc: this.vault.encryptSecret(input.username),
       passwordEnc: input.password ? this.vault.encryptSecret(input.password) : undefined,
+      secretMetaEnc: input.secretMeta ? this.vault.encryptSecret(JSON.stringify(input.secretMeta)) : undefined,
       tags: input.tags ?? [],
       profileId: randomUUID(),
       status: "never_used",
@@ -376,15 +395,16 @@ export class WorkbenchService {
 
     this.store.run(
       `INSERT INTO accounts
-        (id, platform_id, display_name, username_enc, password_enc, tags, profile_id, status, last_login_at, created_at, updated_at)
+        (id, platform_id, display_name, username_enc, password_enc, secret_meta_enc, tags, profile_id, status, last_login_at, created_at, updated_at)
        VALUES
-        (:id, :platformId, :displayName, :usernameEnc, :passwordEnc, :tags, :profileId, :status, :lastLoginAt, :createdAt, :updatedAt)`,
+        (:id, :platformId, :displayName, :usernameEnc, :passwordEnc, :secretMetaEnc, :tags, :profileId, :status, :lastLoginAt, :createdAt, :updatedAt)`,
       {
         id: account.id,
         platformId: account.platformId,
         displayName: account.displayName,
         usernameEnc: JSON.stringify(account.usernameEnc),
         passwordEnc: account.passwordEnc ? JSON.stringify(account.passwordEnc) : "",
+        secretMetaEnc: account.secretMetaEnc ? JSON.stringify(account.secretMetaEnc) : "",
         tags: JSON.stringify(account.tags),
         profileId: account.profileId,
         status: account.status,
@@ -414,6 +434,17 @@ export class WorkbenchService {
 
   getAccount(accountId: string): AccountSummary {
     return this.accountSummaryFromRow(this.requireAccountRow(accountId));
+  }
+
+  getAccountDetail(accountId: string): AccountDetail {
+    const row = this.requireAccountRow(accountId);
+
+    return {
+      ...this.accountSummaryFromRow(row),
+      username: this.vault.decryptSecret(JSON.parse(row.username_enc)),
+      password: row.password_enc ? this.vault.decryptSecret(JSON.parse(row.password_enc)) : undefined,
+      secretMeta: this.decryptAccountSecretMeta(row)
+    };
   }
 
   getProfilePath(accountId: string): string {
@@ -447,6 +478,25 @@ export class WorkbenchService {
         updatedAt: new Date().toISOString()
       }
     );
+  }
+
+  private updateAccountSecretMeta(accountId: string, secretMeta: AccountSecretMetadata): void {
+    this.store.run(
+      "UPDATE accounts SET secret_meta_enc = :secretMetaEnc, updated_at = :updatedAt WHERE id = :id",
+      {
+        id: accountId,
+        secretMetaEnc: JSON.stringify(this.vault.encryptSecret(JSON.stringify(secretMeta))),
+        updatedAt: new Date().toISOString()
+      }
+    );
+  }
+
+  private decryptAccountSecretMeta(row: AccountRow): AccountSecretMetadata {
+    if (!row.secret_meta_enc) {
+      return {};
+    }
+
+    return JSON.parse(this.vault.decryptSecret(JSON.parse(row.secret_meta_enc))) as AccountSecretMetadata;
   }
 
   private requirePlatform(platformId: string): Platform {
@@ -537,16 +587,25 @@ export class WorkbenchService {
     );
   }
 
-  private parseCredentialFile(filePath: string): { valid: Array<{ username: string; password: string }>; invalid: number } {
+  private parseCredentialFile(filePath: string): {
+    valid: Array<{ username: string; password: string; secretMeta?: AccountSecretMetadata }>;
+    invalid: number;
+  } {
     const emailPattern = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
     const lines = readFileSync(filePath, "utf8")
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean);
 
-    const valid: Array<{ username: string; password: string }> = [];
+    const valid: Array<{ username: string; password: string; secretMeta?: AccountSecretMetadata }> = [];
     let invalid = 0;
-    for (const line of lines) {
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex];
+      if (line.toLowerCase() === "copy") {
+        invalid += 1;
+        continue;
+      }
+
       const parts = this.splitCredentialLine(line);
       const usernameIndex = parts.findIndex((part) => emailPattern.test(part));
       const username = usernameIndex >= 0 ? parts[usernameIndex] : "";
@@ -557,10 +616,33 @@ export class WorkbenchService {
         continue;
       }
 
-      valid.push({ username, password });
+      const secretMeta = this.parseCredentialMetadata(parts, usernameIndex);
+      const metadataLineOffset = lines[lineIndex + 1]?.toLowerCase() === "copy" ? 2 : 1;
+      const metadataLine = lines[lineIndex + metadataLineOffset];
+      if (metadataLine && !this.splitCredentialLine(metadataLine).some((part) => emailPattern.test(part))) {
+        const metadataParts = this.splitCredentialLine(metadataLine);
+        if (metadataParts.length >= 2) {
+          secretMeta.verificationSecret = metadataParts[0];
+          secretMeta.region = metadataParts[1];
+          secretMeta.year = metadataParts[2];
+          lineIndex += metadataLineOffset;
+        }
+      }
+
+      valid.push({ username, password, secretMeta: Object.keys(secretMeta).length > 0 ? secretMeta : undefined });
     }
 
     return { valid, invalid };
+  }
+
+  private parseCredentialMetadata(parts: string[], usernameIndex: number): AccountSecretMetadata {
+    const secretMeta: AccountSecretMetadata = {};
+    const extraCode = usernameIndex >= 0 ? parts[usernameIndex + 2] : undefined;
+    if (extraCode) {
+      secretMeta.extraCode = extraCode;
+    }
+
+    return secretMeta;
   }
 
   private splitCredentialLine(line: string): string[] {

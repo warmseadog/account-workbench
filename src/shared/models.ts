@@ -53,6 +53,7 @@ export interface Account {
   displayName: string;
   usernameEnc: EncryptedSecret;
   passwordEnc?: EncryptedSecret;
+  secretMetaEnc?: EncryptedSecret;
   tags: string[];
   profileId: EntityId;
   status: AccountStatus;
@@ -64,6 +65,13 @@ export interface Account {
 export interface AccountSecrets {
   username: string;
   password?: string;
+}
+
+export interface AccountSecretMetadata {
+  extraCode?: string;
+  verificationSecret?: string;
+  region?: string;
+  year?: string;
 }
 
 export interface BrowserProfile {

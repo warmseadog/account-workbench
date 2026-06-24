@@ -1,10 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import type { AccountSummary } from "../main/services/workbench-service";
+import type { AccountDetail, AccountSummary } from "../main/services/workbench-service";
 import type { LoginAdapter, LoginAuthMode, LoginRun, Platform } from "../shared/models";
 import {
   MAX_BULK_LAUNCH_ACCOUNTS,
   pruneBulkSelection,
-  selectFirstBulkAccounts,
+  selectBulkAccountRange,
   toggleBulkAccountSelection
 } from "./bulk-selection";
 import {
@@ -12,6 +12,11 @@ import {
   describeSessionOpenFeedback,
   type RunFeedback
 } from "./run-feedback";
+import {
+  BULK_LAUNCH_CONCURRENCY,
+  BULK_LAUNCH_STAGGER_MS,
+  runBulkLaunchQueue
+} from "./bulk-launch-queue";
 import { UnlockScreen } from "./UnlockScreen";
 
 interface UiLog {
@@ -44,6 +49,10 @@ const emptyAccountForm = {
   displayName: "",
   username: "",
   password: "",
+  verificationSecret: "",
+  extraCode: "",
+  region: "",
+  year: "",
   tags: ""
 };
 
@@ -92,10 +101,14 @@ export function App() {
   const [activeRuns, setActiveRuns] = useState(0);
   const [selectedBulkAccountIds, setSelectedBulkAccountIds] = useState<string[]>([]);
   const [accountFeedback, setAccountFeedback] = useState<Record<string, RunFeedback>>({});
+  const [accountDetails, setAccountDetails] = useState<Record<string, AccountDetail>>({});
+  const [bulkCount, setBulkCount] = useState(5);
+  const [bulkStartIndex, setBulkStartIndex] = useState(1);
 
   const bridge = window.accountWorkbench;
   const selectedPlatform = platforms.find((platform) => platform.id === selectedPlatformId);
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId);
+  const selectedAccountDetail = selectedAccountId ? accountDetails[selectedAccountId] : undefined;
   const isManualSessionAdapter = adapterForm.authMode === "manual_session";
   const isFlowPasswordAdapter = adapterForm.authMode === "flow_password";
   const visibleAccounts = useMemo(
@@ -109,6 +122,8 @@ export function App() {
         .filter((account): account is AccountSummary => Boolean(account)),
     [accounts, selectedBulkAccountIds]
   );
+  const currentTargetUrl = selectedPlatform?.loginUrl ?? "https://www.dola.com/chat/?from_logout=1";
+  const bulkRangeEnd = Math.min(visibleAccounts.length, bulkStartIndex + bulkCount - 1);
 
   useEffect(() => {
     const activeBridge = bridge;
@@ -152,8 +167,51 @@ export function App() {
   }, [unlocked, selectedPlatformId]);
 
   useEffect(() => {
-    setSelectedBulkAccountIds((current) => pruneBulkSelection(current, visibleAccounts));
-  }, [visibleAccounts]);
+    setSelectedBulkAccountIds((current) => {
+      const pruned = pruneBulkSelection(current, visibleAccounts);
+      return pruned.length > 0 ? pruned : selectBulkAccountRange(visibleAccounts, bulkStartIndex, bulkCount);
+    });
+  }, [visibleAccounts, bulkStartIndex, bulkCount]);
+
+  useEffect(() => {
+    if (visibleAccounts.length === 0) {
+      setBulkStartIndex(1);
+      return;
+    }
+
+    setBulkStartIndex((current) => Math.min(Math.max(1, current), visibleAccounts.length));
+  }, [visibleAccounts.length]);
+
+  useEffect(() => {
+    if (!bridge || !unlocked || visibleAccounts.length === 0) return;
+    const activeBridge = bridge;
+    let cancelled = false;
+
+    async function loadVisibleAccountDetails() {
+      const missingAccounts = visibleAccounts.filter((account) => !accountDetails[account.id]);
+      if (missingAccounts.length === 0) return;
+
+      try {
+        const details = await Promise.all(missingAccounts.map((account) => activeBridge.getAccountDetail(account.id)));
+        if (cancelled) return;
+        setAccountDetails((current) => {
+          const next = { ...current };
+          details.forEach((detail: AccountDetail) => {
+            next[detail.id] = detail;
+          });
+          return next;
+        });
+      } catch (error) {
+        addLog("error", error instanceof Error ? error.message : "读取账号完整信息失败。");
+      }
+    }
+
+    void loadVisibleAccountDetails();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge, unlocked, visibleAccounts, accountDetails]);
 
   async function refresh() {
     if (!bridge) return;
@@ -289,6 +347,18 @@ export function App() {
     }
   }
 
+  async function handlePickCredentialFile() {
+    if (!bridge) return;
+    try {
+      const filePath = await bridge.pickAccountFile();
+      if (filePath) {
+        setCredentialFilePath(filePath);
+      }
+    } catch (error) {
+      addLog("error", error instanceof Error ? error.message : "选择账号文件失败。");
+    }
+  }
+
   async function handleSaveAdapter(event: FormEvent) {
     event.preventDefault();
     if (!bridge || !selectedPlatformId) return;
@@ -320,6 +390,12 @@ export function App() {
         displayName: accountForm.displayName,
         username: accountForm.username,
         password: accountForm.password || undefined,
+        secretMeta: {
+          verificationSecret: accountForm.verificationSecret || undefined,
+          extraCode: accountForm.extraCode || undefined,
+          region: accountForm.region || undefined,
+          year: accountForm.year || undefined
+        },
         tags: accountForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean)
       });
       setAccountForm(emptyAccountForm);
@@ -351,7 +427,7 @@ export function App() {
     const account = accounts.find((item) => item.id === accountId);
     setActiveRuns((count) => count + 1);
     try {
-      await executeLaunch(accountId, account?.displayName ?? "账号");
+      await executeLaunch(accountId, account ? getAccountLabel(account) : "账号");
     } finally {
       setActiveRuns((count) => Math.max(0, count - 1));
     }
@@ -359,23 +435,71 @@ export function App() {
 
   async function handleBulkLaunch() {
     if (selectedBulkAccounts.length === 0) {
-      addLog("error", "请先选择 1-10 个账号。");
+      addLog("error", "请先选择一批账号。");
       return;
     }
 
     const accountsToLaunch = selectedBulkAccounts.slice(0, MAX_BULK_LAUNCH_ACCOUNTS);
-    setActiveRuns((count) => count + accountsToLaunch.length);
-    addLog("info", `批量上号开始：${accountsToLaunch.length} 个账号。`);
+    const startedAt = Date.now();
+    addLog(
+      "info",
+      `批量上号开始：第 ${bulkStartIndex}-${bulkRangeEnd} 个账号，最多并发 ${BULK_LAUNCH_CONCURRENCY} 个，错峰 ${BULK_LAUNCH_STAGGER_MS}ms。`
+    );
     try {
-      await Promise.all(accountsToLaunch.map((account) => executeLaunch(account.id, account.displayName)));
-      addLog("success", `批量上号完成：已处理 ${accountsToLaunch.length} 个账号。`);
-    } finally {
-      setActiveRuns((count) => Math.max(0, count - accountsToLaunch.length));
+      await runBulkLaunchQueue(accountsToLaunch, async (account) => {
+        setActiveRuns((count) => count + 1);
+        try {
+          await executeLaunch(account.id, getAccountLabel(account));
+        } finally {
+          setActiveRuns((count) => Math.max(0, count - 1));
+        }
+      });
+      const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      addLog("success", `批量上号完成：已处理 ${accountsToLaunch.length} 个账号，用时 ${elapsedSeconds}s。`);
+      selectNextBulkRange();
+    } catch (error) {
+      addLog("error", error instanceof Error ? error.message : "批量上号调度失败。");
     }
   }
 
   function toggleBulkSelection(accountId: string) {
     setSelectedBulkAccountIds((current) => toggleBulkAccountSelection(current, accountId));
+  }
+
+  function handleSelectBulkCount(count: number) {
+    const nextCount = Math.min(MAX_BULK_LAUNCH_ACCOUNTS, Math.max(1, count));
+    setBulkCount(nextCount);
+    setSelectedBulkAccountIds(selectBulkAccountRange(visibleAccounts, bulkStartIndex, nextCount));
+  }
+
+  function handleSelectBulkStart(startIndex: number) {
+    const nextStartIndex = normalizeBulkStartIndex(startIndex);
+    setBulkStartIndex(nextStartIndex);
+    setSelectedBulkAccountIds(selectBulkAccountRange(visibleAccounts, nextStartIndex, bulkCount));
+  }
+
+  function selectCurrentBulkRange() {
+    setSelectedBulkAccountIds(selectBulkAccountRange(visibleAccounts, bulkStartIndex, bulkCount));
+  }
+
+  function selectNextBulkRange() {
+    const nextStartIndex = bulkStartIndex + bulkCount;
+    if (nextStartIndex > visibleAccounts.length) {
+      setBulkStartIndex(Math.max(1, visibleAccounts.length));
+      setSelectedBulkAccountIds([]);
+      return;
+    }
+
+    setBulkStartIndex(nextStartIndex);
+    setSelectedBulkAccountIds(selectBulkAccountRange(visibleAccounts, nextStartIndex, bulkCount));
+  }
+
+  function normalizeBulkStartIndex(startIndex: number): number {
+    if (visibleAccounts.length === 0) {
+      return 1;
+    }
+
+    return Math.min(visibleAccounts.length, Math.max(1, Math.floor(startIndex)));
   }
 
   async function handleOpenSession(accountId: string) {
@@ -386,19 +510,48 @@ export function App() {
       await bridge.openSession(accountId);
       const feedback = describeSessionOpenFeedback();
       setAccountRunFeedback(accountId, feedback);
-      addLog("success", `${account?.displayName ?? "账号"}：已打开该账号的独立会话窗口。`);
+      addLog("success", `${account ? getAccountLabel(account) : "账号"}：已打开该账号的独立会话窗口。`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "打开会话失败。";
       setAccountRunFeedback(accountId, { level: "error", message });
-      addLog("error", `${account?.displayName ?? "账号"}：${message}`);
+      addLog("error", `${account ? getAccountLabel(account) : "账号"}：${message}`);
     }
+  }
+
+  function getAccountLabel(account: AccountSummary): string {
+    const rowNumber = visibleAccounts.findIndex((item) => item.id === account.id) + 1;
+    const prefix = rowNumber > 0 ? `#${rowNumber}` : "账号";
+    return `${prefix} ${account.usernamePreview}`;
   }
 
   async function handleDeleteAccount(accountId: string) {
     if (!bridge || !confirm("只删除账号记录，不自动删除浏览器 Profile。确认删除？")) return;
     await bridge.deleteAccount(accountId);
     setSelectedAccountId(undefined);
+    setAccountDetails((current) => {
+      const next = { ...current };
+      delete next[accountId];
+      return next;
+    });
     addLog("success", "账号记录已删除。");
+    await refresh();
+  }
+
+  async function handleDeletePlatform(platform: Platform) {
+    if (
+      !bridge ||
+      !confirm(`确认删除平台「${platform.name}」？该平台下的账号记录也会一起删除，浏览器 Profile 文件不会自动删除。`)
+    ) {
+      return;
+    }
+
+    await bridge.deletePlatform(platform.id);
+    if (selectedPlatformId === platform.id) {
+      setSelectedPlatformId(undefined);
+      setSelectedAccountId(undefined);
+      setSelectedBulkAccountIds([]);
+    }
+    addLog("success", `平台已删除：${platform.name}`);
     await refresh();
   }
 
@@ -438,39 +591,57 @@ export function App() {
       </header>
 
       <aside className="platform-pane">
-        <div className="pane-title">
-          <span>平台</span>
-          <span>{platforms.length}</span>
-        </div>
-        <button className={!selectedPlatformId ? "platform-item active" : "platform-item"} onClick={() => setSelectedPlatformId(undefined)}>
-          全部账号
-        </button>
-        {platforms.map((platform) => (
-          <button
-            key={platform.id}
-            className={platform.id === selectedPlatformId ? "platform-item active" : "platform-item"}
-            onClick={() => setSelectedPlatformId(platform.id)}
-          >
-            <span>{platform.name}</span>
-            <small>{platform.allowedOrigins[0]}</small>
-          </button>
-        ))}
+        <section className="side-section target-section">
+          <h2>目标网址</h2>
+          <div className="url-box">{currentTargetUrl}</div>
+          <div className="side-meta">
+            <span>{selectedPlatform ? selectedPlatform.name : "全部账号"}</span>
+            <span>{visibleAccounts.length} 个账号</span>
+          </div>
+          <button type="button" onClick={() => void handleCreateDolaGooglePasswordPreset()}>初始化 Dola</button>
+        </section>
 
-        <section className="quick-preset">
-          <h2>Dola 快速配置</h2>
-          <p className="hint">为 Dola 创建独立 Profile。Google 账号密码会自动填入，后续验证码、短信或 2FA 由你手动完成。</p>
-          <button type="button" onClick={() => void handleCreateDolaPreset()}>添加 Dola 登录预设</button>
-          <button type="button" onClick={() => void handleCreateDolaGooglePasswordPreset()}>添加 Dola Google 自动填充</button>
+        <section className="side-section import-section">
+          <h2>导入账号文件</h2>
           <input
             value={credentialFilePath}
             onChange={(event) => setCredentialFilePath(event.target.value)}
             placeholder="本地账号文件路径"
           />
-          <button type="button" onClick={() => void handleImportDolaGoogleAccounts()}>导入 Dola Google 账号文件</button>
+          <button type="button" onClick={() => void handlePickCredentialFile()}>选择本机文件</button>
+          <button className="primary-action" type="button" onClick={() => void handleImportDolaGoogleAccounts()}>导入</button>
+        </section>
+
+        <section className="side-section">
+          <div className="pane-title">
+            <span>平台</span>
+            <span>{platforms.length}</span>
+          </div>
+          <button className={!selectedPlatformId ? "platform-item active" : "platform-item"} onClick={() => setSelectedPlatformId(undefined)}>
+            <span>全部账号</span>
+            <small>{accounts.length} 个本地账号</small>
+          </button>
+          {platforms.map((platform) => (
+            <div key={platform.id} className={platform.id === selectedPlatformId ? "platform-row active" : "platform-row"}>
+              <button className="platform-select" onClick={() => setSelectedPlatformId(platform.id)}>
+                <span>{platform.name}</span>
+                <small>{platform.allowedOrigins[0]}</small>
+              </button>
+              <button
+                className="platform-delete danger"
+                type="button"
+                onClick={() => void handleDeletePlatform(platform)}
+                aria-label={`删除平台 ${platform.name}`}
+              >
+                删除
+              </button>
+            </div>
+          ))}
         </section>
 
         <details className="advanced-panel">
-          <summary>平台配置</summary>
+          <summary>高级配置</summary>
+          <button type="button" onClick={() => void handleCreateDolaPreset()}>创建手动会话预设</button>
           <form className="stacked-form" onSubmit={handleCreatePlatform}>
             <h2>添加平台</h2>
             <input required value={platformForm.name} onChange={(event) => setPlatformForm({ ...platformForm, name: event.target.value })} placeholder="平台名称" />
@@ -488,10 +659,34 @@ export function App() {
           <span>{visibleAccounts.length} 个账号</span>
         </div>
         <div className="bulk-toolbar">
-          <strong>已选择 {selectedBulkAccountIds.length}/{MAX_BULK_LAUNCH_ACCOUNTS}</strong>
-          <button type="button" onClick={() => setSelectedBulkAccountIds(selectFirstBulkAccounts(visibleAccounts))}>
-            选择前 10 个
+          <strong>当前批次 {visibleAccounts.length > 0 ? `${bulkStartIndex}-${bulkRangeEnd}` : "0-0"}</strong>
+          <label className="compact-field">
+            <span>起始序号</span>
+            <input
+              min={1}
+              max={Math.max(1, visibleAccounts.length)}
+              type="number"
+              value={bulkStartIndex}
+              onChange={(event) => handleSelectBulkStart(Number(event.target.value))}
+            />
+          </label>
+          <label className="compact-field">
+            <span>每批数量</span>
+            <input
+              min={1}
+              max={MAX_BULK_LAUNCH_ACCOUNTS}
+              type="number"
+              value={bulkCount}
+              onChange={(event) => handleSelectBulkCount(Number(event.target.value))}
+            />
+          </label>
+          <button type="button" onClick={selectCurrentBulkRange} disabled={visibleAccounts.length === 0}>
+            选择当前批
           </button>
+          <button type="button" onClick={selectNextBulkRange} disabled={visibleAccounts.length === 0}>
+            下一批
+          </button>
+          <span className="bulk-range-note">已选择 {selectedBulkAccountIds.length}/{MAX_BULK_LAUNCH_ACCOUNTS}</span>
           <button type="button" onClick={() => setSelectedBulkAccountIds([])} disabled={selectedBulkAccountIds.length === 0}>
             清空
           </button>
@@ -505,68 +700,82 @@ export function App() {
           </button>
         </div>
         <div className="table">
-          <div className="table-row table-head">
+          <div className="table-row table-head account-grid">
             <span>选择</span>
-            <span>账号</span>
-            <span>用户名</span>
-            <span>状态</span>
+            <span>序号</span>
             <span>操作</span>
+            <span>邮箱</span>
+            <span>密码</span>
+            <span>验证密钥</span>
+            <span>地区/年份</span>
+            <span>当前步骤</span>
           </div>
-          {visibleAccounts.map((account) => (
+          {visibleAccounts.map((account, index) => (
             <div
               key={account.id}
-              className={account.id === selectedAccountId ? "table-row selected" : "table-row"}
+              className={account.id === selectedAccountId ? "table-row account-grid selected" : "table-row account-grid"}
               onClick={() => setSelectedAccountId(account.id)}
             >
               <span>
                 <input
                   className="row-check"
                   type="checkbox"
-                  aria-label={`选择 ${account.displayName}`}
+                  aria-label={`选择第 ${index + 1} 个账号`}
                   checked={selectedBulkAccountIds.includes(account.id)}
                   disabled={!selectedBulkAccountIds.includes(account.id) && selectedBulkAccountIds.length >= MAX_BULK_LAUNCH_ACCOUNTS}
                   onClick={(event) => event.stopPropagation()}
                   onChange={() => toggleBulkSelection(account.id)}
                 />
               </span>
-              <span>{account.displayName}</span>
-              <span>{account.usernamePreview}</span>
+              <span className="row-index">{index + 1}</span>
+              <span className="row-actions">
+                <button className="primary-action" onClick={(event) => { event.stopPropagation(); void handleLaunch(account.id); }}>上号</button>
+                <button onClick={(event) => { event.stopPropagation(); void handleOpenSession(account.id); }}>会话</button>
+                <button className="danger" onClick={(event) => { event.stopPropagation(); void handleDeleteAccount(account.id); }}>删</button>
+              </span>
+              <span className="secret-cell">{accountDetails[account.id]?.username ?? account.usernamePreview}</span>
+              <span className="secret-cell">{accountDetails[account.id]?.password ?? "读取中"}</span>
+              <span className="secret-cell">{accountDetails[account.id]?.secretMeta.verificationSecret ?? "-"}</span>
+              <span>{[accountDetails[account.id]?.secretMeta.region, accountDetails[account.id]?.secretMeta.year].filter(Boolean).join(" / ") || "-"}</span>
               <span className={accountFeedback[account.id] ? `inline-status ${accountFeedback[account.id].level}` : undefined}>
                 {accountFeedback[account.id]?.message ?? account.status}
-              </span>
-              <span className="row-actions">
-                <button onClick={(event) => { event.stopPropagation(); void handleLaunch(account.id); }}>上号</button>
-                <button onClick={(event) => { event.stopPropagation(); void handleOpenSession(account.id); }}>打开会话</button>
               </span>
             </div>
           ))}
           {visibleAccounts.length === 0 && <div className="empty-state">暂无账号。先添加平台、适配器和账号。</div>}
         </div>
-      </section>
 
-      <aside className="detail-pane">
-        <section>
-          <h2>批量上号</h2>
-          <div className="detail-box">
-            <strong>已选择 {selectedBulkAccountIds.length}/{MAX_BULK_LAUNCH_ACCOUNTS}</strong>
-            <span>每个账号都会打开自己的独立 Chrome Profile。</span>
-            <button
-              className="primary-action"
-              type="button"
-              onClick={() => void handleBulkLaunch()}
-              disabled={selectedBulkAccountIds.length === 0}
-            >
-              批量上号
-            </button>
+        <section className="run-panel">
+          <div className="pane-title">
+            <span>步骤反馈</span>
+            <span>{selectedBulkAccounts.length}</span>
           </div>
+          {selectedBulkAccounts.length === 0 ? (
+            <p className="hint">选择账号后，这里显示每个账号卡在哪一步。</p>
+          ) : (
+            <div className="run-list">
+              {selectedBulkAccounts.map((account) => (
+                <div key={account.id} className="run-card">
+                  <strong>{getAccountLabel(account)}</strong>
+                  <span className={accountFeedback[account.id] ? `inline-status ${accountFeedback[account.id].level}` : "inline-status"}>
+                    {accountFeedback[account.id]?.message ?? "等待开始"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
-        <section>
+        <section className="account-detail-panel">
           <h2>当前账号</h2>
           {selectedAccount ? (
             <div className="detail-box">
-              <strong>{selectedAccount.displayName}</strong>
-              <span>{selectedAccount.usernamePreview}</span>
+              <strong>{getAccountLabel(selectedAccount)}</strong>
+              <span>邮箱: {selectedAccountDetail?.username ?? selectedAccount.usernamePreview}</span>
+              <span>密码: {selectedAccountDetail?.password ?? "读取中"}</span>
+              <span>验证密钥: {selectedAccountDetail?.secretMeta.verificationSecret ?? "-"}</span>
+              <span>短码: {selectedAccountDetail?.secretMeta.extraCode ?? "-"}</span>
+              <span>地区/年份: {[selectedAccountDetail?.secretMeta.region, selectedAccountDetail?.secretMeta.year].filter(Boolean).join(" / ") || "-"}</span>
               <span>标签: {selectedAccount.tags.join(", ") || "-"}</span>
               <span>Profile: {selectedAccount.profileId.slice(0, 8)}</span>
               <span>状态: {accountFeedback[selectedAccount.id]?.message ?? selectedAccount.status}</span>
@@ -604,11 +813,15 @@ export function App() {
             <input disabled={!selectedPlatformId} required value={accountForm.displayName} onChange={(event) => setAccountForm({ ...accountForm, displayName: event.target.value })} placeholder="显示名称" />
             <input disabled={!selectedPlatformId} required value={accountForm.username} onChange={(event) => setAccountForm({ ...accountForm, username: event.target.value })} placeholder="账号/邮箱" />
             <input disabled={!selectedPlatformId} required={isFlowPasswordAdapter || !isManualSessionAdapter} type="password" value={accountForm.password} onChange={(event) => setAccountForm({ ...accountForm, password: event.target.value })} placeholder="密码，手动会话可留空" />
+            <input disabled={!selectedPlatformId} value={accountForm.verificationSecret} onChange={(event) => setAccountForm({ ...accountForm, verificationSecret: event.target.value })} placeholder="验证密钥 / 2FA Secret" />
+            <input disabled={!selectedPlatformId} value={accountForm.extraCode} onChange={(event) => setAccountForm({ ...accountForm, extraCode: event.target.value })} placeholder="短码 / 附加字段" />
+            <input disabled={!selectedPlatformId} value={accountForm.region} onChange={(event) => setAccountForm({ ...accountForm, region: event.target.value })} placeholder="地区" />
+            <input disabled={!selectedPlatformId} value={accountForm.year} onChange={(event) => setAccountForm({ ...accountForm, year: event.target.value })} placeholder="年份" />
             <input disabled={!selectedPlatformId} value={accountForm.tags} onChange={(event) => setAccountForm({ ...accountForm, tags: event.target.value })} placeholder="标签，用英文逗号分隔" />
             <button disabled={!selectedPlatformId} type="submit">保存账号</button>
           </form>
         </details>
-      </aside>
+      </section>
 
       <section className="log-pane">
         <div className="pane-title">

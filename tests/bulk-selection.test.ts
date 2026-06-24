@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_BULK_LAUNCH_ACCOUNTS,
   pruneBulkSelection,
+  selectBulkAccountRange,
   selectFirstBulkAccounts,
   toggleBulkAccountSelection
 } from "../src/renderer/bulk-selection";
@@ -33,6 +34,24 @@ describe("bulk account selection", () => {
       "account-9",
       "account-10"
     ]);
+  });
+
+  it("selects a bulk account range by visible row number", () => {
+    const accounts = Array.from({ length: 12 }, (_, index) => ({ id: `account-${index + 1}` }));
+
+    expect(selectBulkAccountRange(accounts, 6, 5)).toEqual([
+      "account-6",
+      "account-7",
+      "account-8",
+      "account-9",
+      "account-10"
+    ]);
+  });
+
+  it("caps range selection to ten accounts", () => {
+    const accounts = Array.from({ length: 20 }, (_, index) => ({ id: `account-${index + 1}` }));
+
+    expect(selectBulkAccountRange(accounts, 1, 12)).toHaveLength(MAX_BULK_LAUNCH_ACCOUNTS);
   });
 
   it("drops selections that are no longer visible", () => {

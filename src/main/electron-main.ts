@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PlaywrightBrowserController } from "./runs/login-runner.js";
@@ -69,8 +69,23 @@ ipcMain.handle("vault:dev-unlock", () => {
 
 ipcMain.handle("platforms:list", () => requireService().listPlatforms());
 ipcMain.handle("platforms:create", (_event, input: CreatePlatformInput) => requireService().createPlatform(input));
+ipcMain.handle("platforms:delete", (_event, platformId: string) => {
+  requireService().deletePlatform(platformId);
+  return { deleted: true };
+});
 ipcMain.handle("platforms:create-dola-preset", () => requireService().createDolaPreset());
 ipcMain.handle("platforms:create-dola-google-password-preset", () => requireService().createDolaGooglePasswordPreset());
+ipcMain.handle("files:pick-account-file", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openFile"],
+    filters: [
+      { name: "账号文件", extensions: ["txt", "csv", "tsv"] },
+      { name: "所有文件", extensions: ["*"] }
+    ]
+  });
+
+  return result.canceled ? undefined : result.filePaths[0];
+});
 ipcMain.handle("accounts:import-dola-google-file", (_event, input: ImportAccountsFromFileInput) => {
   return requireService().importDolaGoogleAccountsFromFile(input);
 });
@@ -78,6 +93,7 @@ ipcMain.handle("accounts:list", (_event, platformId?: string) => {
   const active = requireService();
   return platformId ? active.listAccounts(platformId) : active.listAllAccounts();
 });
+ipcMain.handle("accounts:detail", (_event, accountId: string) => requireService().getAccountDetail(accountId));
 ipcMain.handle("accounts:create", (_event, input: CreateAccountInput) => requireService().createAccount(input));
 ipcMain.handle("accounts:delete", (_event, accountId: string) => {
   requireService().deleteAccount(accountId);

@@ -66,6 +66,27 @@ describe("WorkbenchService", () => {
     expect(service.listPlatforms()).toHaveLength(1);
   });
 
+  it("deletes a platform and its account records", () => {
+    const service = createService();
+    const platform = service.createPlatform({
+      name: "Example",
+      baseUrl: "https://example.com",
+      loginUrl: "https://example.com/login",
+      allowedOrigins: ["https://example.com"]
+    });
+    service.createAccount({
+      platformId: platform.id,
+      displayName: "运营账号",
+      username: "owner@example.com",
+      password: "secret-password"
+    });
+
+    service.deletePlatform(platform.id);
+
+    expect(service.listPlatforms()).toHaveLength(0);
+    expect(service.listAccounts(platform.id)).toHaveLength(0);
+  });
+
   it("creates Dola manual-session preset without requiring stored Google password", () => {
     const service = createService();
 
@@ -156,6 +177,37 @@ describe("WorkbenchService", () => {
     });
     expect(JSON.stringify(service.dumpRawAccountRow(accounts[0].id))).not.toContain("password-one");
     expect(JSON.stringify(accounts)).not.toContain("owner1@gmail.com");
+  });
+
+  it("imports 91kami-style credential metadata for local display", () => {
+    const service = createService();
+    const dir = mkdtempSync(path.join(tmpdir(), "account-workbench-import-meta-"));
+    const filePath = path.join(dir, "accounts.txt");
+    writeFileSync(
+      filePath,
+      [
+        "owner1@gmail.com----password-one----short-code",
+        "copy",
+        "totp-secret-value----United States----2020"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = service.importDolaGoogleAccountsFromFile({ filePath });
+    const [account] = service.listAccounts(result.platform.id);
+    const detail = service.getAccountDetail(account.id);
+
+    expect(result.imported).toBe(1);
+    expect(result.skippedInvalid).toBe(0);
+    expect(detail.username).toBe("owner1@gmail.com");
+    expect(detail.password).toBe("password-one");
+    expect(detail.secretMeta).toEqual({
+      extraCode: "short-code",
+      verificationSecret: "totp-secret-value",
+      region: "United States",
+      year: "2020"
+    });
+    expect(JSON.stringify(service.dumpRawAccountRow(account.id))).not.toContain("totp-secret-value");
   });
 
   it("repairs imported duplicate Dola Google accounts that are missing passwords", () => {

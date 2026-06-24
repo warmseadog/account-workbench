@@ -67,6 +67,7 @@ export class SqliteStore {
         display_name TEXT NOT NULL,
         username_enc TEXT NOT NULL,
         password_enc TEXT NOT NULL,
+        secret_meta_enc TEXT NOT NULL DEFAULT '',
         tags TEXT NOT NULL,
         profile_id TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -90,6 +91,7 @@ export class SqliteStore {
     this.ensureColumn("login_adapters", "auth_mode", "TEXT NOT NULL DEFAULT 'password'");
     this.ensureColumn("login_adapters", "start_locator", "TEXT");
     this.ensureColumn("login_adapters", "flow_steps", "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureColumn("accounts", "secret_meta_enc", "TEXT NOT NULL DEFAULT ''");
   }
 
   private ensureColumn(table: string, column: string, definition: string): void {

@@ -16,6 +16,7 @@ export interface LoginRunContext {
 export interface BrowserSession {
   currentUrl(): Promise<string>;
   goto(url: string): Promise<void>;
+  focusLocator?(locator: string, timeoutMs?: number): Promise<void>;
   fill(locator: string, value: string): Promise<void>;
   click(locator: string): Promise<void>;
   isVisible(locator: string): Promise<boolean>;
@@ -80,11 +81,13 @@ export class LoginRunner {
     }
     const currentUrl = await session.currentUrl();
 
-    if (this.isConcreteUrl(currentUrl) && !originRules.isAllowedUrl(currentUrl)) {
+    if (this.isStartupUrl(currentUrl)) {
+      await session.goto(context.platform.loginUrl);
+    } else if (this.isConcreteUrl(currentUrl) && !originRules.isAllowedUrl(currentUrl)) {
       return fail("origin_not_allowed", "Current browser URL is outside the configured platform origins.");
     }
 
-    if (!this.isConcreteUrl(currentUrl)) {
+    if (!this.isConcreteUrl(await session.currentUrl())) {
       await session.goto(context.platform.loginUrl);
     }
 
@@ -96,7 +99,7 @@ export class LoginRunner {
     if (authMode === "manual_session") {
       if (context.adapter.startLocator) {
         step("checking_session", "正在打开配置好的登录入口，用于手动建立会话。");
-        await session.click(context.adapter.startLocator);
+        await this.click(session, context.adapter.startLocator);
       }
 
       step("waiting_for_result", "正在等待已有会话，或等待手动完成 Google/手机号/验证登录。");
@@ -164,17 +167,17 @@ export class LoginRunner {
 
         try {
           if (flowStep.type === "click") {
-            await session.click(flowStep.locator);
+            await this.click(session, flowStep.locator);
             step("filling_credentials", "已点击登录流程按钮。");
           }
 
           if (flowStep.type === "fill_username") {
-            await session.fill(flowStep.locator, context.credentials.username);
+            await this.fill(session, flowStep.locator, context.credentials.username);
             step("filling_credentials", "已填写账号字段。");
           }
 
           if (flowStep.type === "fill_password") {
-            await session.fill(flowStep.locator, context.credentials.password);
+            await this.fill(session, flowStep.locator, context.credentials.password);
             step("filling_credentials", "已填写密码字段。");
           }
         } catch {
@@ -213,9 +216,9 @@ export class LoginRunner {
     }
 
     step("filling_credentials", "正在填写配置好的账号和密码字段。");
-    await session.fill(context.adapter.usernameLocator, context.credentials.username);
-    await session.fill(context.adapter.passwordLocator, context.credentials.password);
-    await session.click(context.adapter.submitLocator);
+    await this.fill(session, context.adapter.usernameLocator, context.credentials.username);
+    await this.fill(session, context.adapter.passwordLocator, context.credentials.password);
+    await this.click(session, context.adapter.submitLocator);
 
     step("waiting_for_result", "正在等待登录结果或手动接管条件。");
     const result = await session.waitForLoginResult(context);
@@ -254,6 +257,28 @@ export class LoginRunner {
   private isConcreteUrl(url: string): boolean {
     return url.length > 0 && !url.startsWith("about:");
   }
+
+  private isStartupUrl(url: string): boolean {
+    return (
+      url.length === 0 ||
+      url.startsWith("about:") ||
+      url.startsWith("chrome://newtab") ||
+      url.startsWith("chrome://new-tab-page") ||
+      url.startsWith("chrome://welcome") ||
+      url.startsWith("edge://newtab") ||
+      url.startsWith("data:")
+    );
+  }
+
+  private async fill(session: BrowserSession, locator: string, value: string): Promise<void> {
+    await session.focusLocator?.(locator, 5_000);
+    await session.fill(locator, value);
+  }
+
+  private async click(session: BrowserSession, locator: string): Promise<void> {
+    await session.focusLocator?.(locator, 750);
+    await session.click(locator);
+  }
 }
 
 export class PlaywrightBrowserController implements BrowserController {
@@ -272,7 +297,7 @@ export class PlaywrightBrowserController implements BrowserController {
 }
 
 export class PlaywrightBrowserSession implements BrowserSession {
-  constructor(private readonly page: Page, private readonly retainConnection?: unknown) {}
+  constructor(private page: Page, private readonly retainConnection?: unknown) {}
 
   async currentUrl(): Promise<string> {
     return this.page.url();
@@ -280,6 +305,13 @@ export class PlaywrightBrowserSession implements BrowserSession {
 
   async goto(url: string): Promise<void> {
     await this.page.goto(url, { waitUntil: "domcontentloaded" });
+  }
+
+  async focusLocator(locator: string, timeoutMs = 2_000): Promise<void> {
+    const page = await this.findPageWithVisibleLocator(locator, timeoutMs);
+    if (page) {
+      this.page = page;
+    }
   }
 
   async fill(locator: string, value: string): Promise<void> {
@@ -291,7 +323,7 @@ export class PlaywrightBrowserSession implements BrowserSession {
   }
 
   async isVisible(locator: string): Promise<boolean> {
-    return this.page.locator(locator).first().isVisible().catch(() => false);
+    return Boolean(await this.findPageWithVisibleLocator(locator, 0));
   }
 
   async waitForLoginResult(context: LoginRunContext): Promise<LoginResult> {
@@ -334,13 +366,34 @@ export class PlaywrightBrowserSession implements BrowserSession {
       }
 
       if (rule.type === "selector_visible") {
-        const visible = await this.page.locator(rule.value).first().isVisible().catch(() => false);
-        if (visible) {
+        if (await this.isVisible(rule.value)) {
           return true;
         }
       }
     }
 
     return false;
+  }
+
+  private async findPageWithVisibleLocator(locator: string, timeoutMs: number): Promise<Page | undefined> {
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      for (const candidate of this.openPages()) {
+        const visible = await candidate.locator(locator).first().isVisible().catch(() => false);
+        if (visible) {
+          return candidate;
+        }
+      }
+
+      if (Date.now() >= deadline) {
+        return undefined;
+      }
+
+      await this.page.waitForTimeout(150).catch(() => undefined);
+    }
+  }
+
+  private openPages(): Page[] {
+    return this.page.context().pages().filter((page) => !page.isClosed());
   }
 }
