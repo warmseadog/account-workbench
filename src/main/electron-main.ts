@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PlaywrightBrowserController } from "./runs/login-runner.js";
@@ -35,8 +35,12 @@ function createService(masterPassword: string): WorkbenchService {
   const userData = app.getPath("userData");
   const store = new SqliteStore(path.join(userData, "account-workbench.sqlite"));
   const vault = CryptoVault.fromMasterPassword(masterPassword);
-  const profiles = new ProfileManager(path.join(userData, "profiles"));
+  const profiles = new ProfileManager(path.join(userData, "profiles"), getProfileTemplatePath());
   return new WorkbenchService(store, vault, profiles);
+}
+
+function getProfileTemplatePath(): string {
+  return path.join(app.getPath("userData"), "profile-template", "user-data");
 }
 
 async function createWindow(): Promise<void> {
@@ -86,6 +90,23 @@ ipcMain.handle("files:pick-account-file", async () => {
 
   return result.canceled ? undefined : result.filePaths[0];
 });
+ipcMain.handle("profiles:open-template", async () => {
+  const profilePath = getProfileTemplatePath();
+  await systemChromeOpener.openProfile({
+    profilePath,
+    url: "chrome://extensions/"
+  });
+  return { opened: true, profilePath };
+});
+ipcMain.handle("system:open-camera-permissions", async () => {
+  if (process.platform === "darwin") {
+    await shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera");
+    return { opened: true };
+  }
+
+  await shell.openExternal("chrome://settings/content/camera");
+  return { opened: true };
+});
 ipcMain.handle("accounts:import-dola-google-file", (_event, input: ImportAccountsFromFileInput) => {
   return requireService().importDolaGoogleAccountsFromFile(input);
 });
@@ -98,6 +119,9 @@ ipcMain.handle("accounts:create", (_event, input: CreateAccountInput) => require
 ipcMain.handle("accounts:delete", (_event, accountId: string) => {
   requireService().deleteAccount(accountId);
   return { deleted: true };
+});
+ipcMain.handle("profiles:reset-account-from-template", (_event, accountId: string) => {
+  return requireService().resetAccountProfileFromTemplate(accountId);
 });
 ipcMain.handle("adapters:save", (_event, input: SaveLoginAdapterInput) => requireService().saveLoginAdapter(input));
 ipcMain.handle("adapters:get", (_event, platformId: string) => requireService().getLoginAdapter(platformId));

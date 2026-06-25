@@ -42,7 +42,10 @@ export class AccountLoginLauncher {
         ? this.options.normalChromeBrowserControllerFactory()
         : this.options.browserControllerFactory();
 
-    return new LoginRunner(browserController).run({
+    return new LoginRunner(browserController, {
+      manualContinueWaitMs: 90_000,
+      manualContinuePollMs: 500
+    }).run({
       accountId,
       platform,
       adapter,

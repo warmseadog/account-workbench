@@ -449,7 +449,16 @@ export class WorkbenchService {
 
   getProfilePath(accountId: string): string {
     const row = this.requireAccountRow(accountId);
-    return this.profiles.ensureProfilePath(row.platform_id, row.id);
+    const platform = this.requirePlatform(row.platform_id);
+    return this.profiles.ensureProfilePath(row.platform_id, row.id, platform.allowedOrigins);
+  }
+
+  resetAccountProfileFromTemplate(accountId: string): { profilePath: string } {
+    const row = this.requireAccountRow(accountId);
+    const platform = this.requirePlatform(row.platform_id);
+    return {
+      profilePath: this.profiles.resetProfilePath(row.platform_id, row.id, platform.allowedOrigins)
+    };
   }
 
   getAccountSecrets(accountId: string): AccountSecrets {

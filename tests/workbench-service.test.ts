@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,11 +7,16 @@ import { ProfileManager } from "../src/main/profiles/profile-manager";
 import { SqliteStore } from "../src/main/storage/sqlite-store";
 import { WorkbenchService } from "../src/main/services/workbench-service";
 
-function createService() {
+function writeNestedFile(filePath: string, value: string): void {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileSync(filePath, value);
+}
+
+function createService(options: { templatePath?: string } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "account-workbench-"));
   const store = new SqliteStore(path.join(dir, "vault.sqlite"));
   const vault = CryptoVault.fromMasterPassword("local-master-password");
-  const profiles = new ProfileManager(path.join(dir, "profiles"));
+  const profiles = new ProfileManager(path.join(dir, "profiles"), options.templatePath);
 
   return new WorkbenchService(store, vault, profiles);
 }
@@ -85,6 +90,85 @@ describe("WorkbenchService", () => {
 
     expect(service.listPlatforms()).toHaveLength(0);
     expect(service.listAccounts(platform.id)).toHaveLength(0);
+  });
+
+  it("resets an account browser profile from the prepared template", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "account-workbench-template-"));
+    const templatePath = path.join(dir, "profile-template", "user-data");
+    writeNestedFile(path.join(templatePath, "Default", "Extensions", "extension-a", "manifest.json"), "{}");
+    const service = createService({ templatePath });
+    const platform = service.createPlatform({
+      name: "Example",
+      baseUrl: "https://example.com",
+      loginUrl: "https://example.com/login",
+      allowedOrigins: ["https://example.com"]
+    });
+    const account = service.createAccount({
+      platformId: platform.id,
+      displayName: "运营账号",
+      username: "owner@example.com",
+      password: "secret-password"
+    });
+    const profilePath = service.getProfilePath(account.id);
+    writeNestedFile(path.join(profilePath, "Default", "Bookmarks"), "existing-profile");
+
+    const result = service.resetAccountProfileFromTemplate(account.id);
+
+    expect(result.profilePath).toBe(profilePath);
+    expect(existsSync(path.join(profilePath, "Default", "Bookmarks"))).toBe(false);
+    expect(existsSync(path.join(profilePath, "Default", "Extensions", "extension-a", "manifest.json"))).toBe(true);
+  });
+
+  it("automatically applies template extensions before returning an account profile path", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "account-workbench-template-"));
+    const templatePath = path.join(dir, "profile-template", "user-data");
+    writeNestedFile(path.join(templatePath, "Default", "Extensions", "extension-a", "1.0.0_0", "manifest.json"), "{}");
+    const service = createService({ templatePath });
+    const platform = service.createPlatform({
+      name: "Example",
+      baseUrl: "https://example.com",
+      loginUrl: "https://example.com/login",
+      allowedOrigins: ["https://example.com"]
+    });
+    const account = service.createAccount({
+      platformId: platform.id,
+      displayName: "运营账号",
+      username: "owner@example.com",
+      password: "secret-password"
+    });
+    const profilePath = service.getProfilePath(account.id);
+    rmSync(path.join(profilePath, "Default", "Extensions"), { recursive: true, force: true });
+    writeNestedFile(path.join(profilePath, "Default", "Bookmarks"), "profile-without-template-extension");
+
+    service.getProfilePath(account.id);
+
+    expect(existsSync(path.join(profilePath, "Default", "Bookmarks"))).toBe(false);
+    expect(existsSync(path.join(profilePath, "Default", "Extensions", "extension-a", "1.0.0_0", "manifest.json"))).toBe(true);
+  });
+
+  it("preconfigures camera access for platform and Google verification origins", () => {
+    const service = createService();
+    const platform = service.createPlatform({
+      name: "Example",
+      baseUrl: "https://example.com",
+      loginUrl: "https://example.com/login",
+      allowedOrigins: ["https://example.com", "https://accounts.google.com"]
+    });
+    const account = service.createAccount({
+      platformId: platform.id,
+      displayName: "运营账号",
+      username: "owner@example.com",
+      password: "secret-password"
+    });
+
+    const profilePath = service.getProfilePath(account.id);
+
+    const preferences = JSON.parse(readFileSync(path.join(profilePath, "Default", "Preferences"), "utf8"));
+    expect(preferences.profile.content_settings.exceptions.media_stream_camera).toMatchObject({
+      "https://example.com,*": { setting: 1 },
+      "https://accounts.google.com,*": { setting: 1 },
+      "https://www.google.com,*": { setting: 1 }
+    });
   });
 
   it("creates Dola manual-session preset without requiring stored Google password", () => {

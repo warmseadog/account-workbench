@@ -28,8 +28,16 @@ export interface BrowserController {
   openPersistentSession(profilePath: string): Promise<BrowserSession>;
 }
 
+export interface LoginRunnerOptions {
+  manualContinueWaitMs?: number;
+  manualContinuePollMs?: number;
+}
+
 export class LoginRunner {
-  constructor(private readonly browser: BrowserController) {}
+  constructor(
+    private readonly browser: BrowserController,
+    private readonly options: LoginRunnerOptions = {}
+  ) {}
 
   async run(context: LoginRunContext): Promise<LoginRun> {
     LoginAdapterRules.validateSelectors(context.adapter);
@@ -120,17 +128,62 @@ export class LoginRunner {
         return fail("missing_password", "This multi-step password flow requires an encrypted password.");
       }
 
+      const flowPassword = context.credentials.password;
       step("filling_credentials", "正在执行配置好的多步骤账号密码登录流程。");
       const flowSteps = context.adapter.flowSteps ?? [];
+      const waitForManualPasswordStep = async (locator: string): Promise<boolean> => {
+        const manualContinueWaitMs = this.options.manualContinueWaitMs ?? 0;
+        if (manualContinueWaitMs <= 0) {
+          return false;
+        }
+
+        step("waiting_for_result", "检测到人工验证；验证完成后会继续等待密码框出现并自动填充。");
+        return await this.waitForVisibleLocator(
+          session,
+          locator,
+          manualContinueWaitMs,
+          this.options.manualContinuePollMs ?? 500
+        );
+      };
       const finishDetectedResultUnlessStepCanContinue = async (
         result: LoginResult,
         nextStep: LoginFlowStep | undefined
       ): Promise<LoginRun | undefined> => {
-        if (result === "manual" && nextStep && (await session.isVisible(nextStep.locator))) {
-          return undefined;
+        if (result === "manual" && nextStep) {
+          if (await session.isVisible(nextStep.locator)) {
+            return undefined;
+          }
+
+          if (nextStep.type === "fill_password") {
+            if (await waitForManualPasswordStep(nextStep.locator)) {
+              return undefined;
+            }
+          }
         }
 
         return finishDetectedResult(result);
+      };
+      const retryPasswordAfterManualStep = async (flowStep: LoginFlowStep): Promise<boolean> => {
+        if (flowStep.type !== "fill_password") {
+          return false;
+        }
+
+        const result = await session.detectLoginResult(context);
+        if (result !== "manual") {
+          return false;
+        }
+
+        if (!(await waitForManualPasswordStep(flowStep.locator))) {
+          return false;
+        }
+
+        try {
+          await this.fill(session, flowStep.locator, flowPassword);
+          step("filling_credentials", "已填写密码字段。");
+          return true;
+        } catch {
+          return false;
+        }
       };
       const handleFlowStepError = async (flowStep: LoginFlowStep): Promise<LoginRun> => {
         const detectedResult = finishDetectedResult(await session.detectLoginResult(context));
@@ -177,11 +230,13 @@ export class LoginRunner {
           }
 
           if (flowStep.type === "fill_password") {
-            await this.fill(session, flowStep.locator, context.credentials.password);
+            await this.fill(session, flowStep.locator, flowPassword);
             step("filling_credentials", "已填写密码字段。");
           }
         } catch {
-          return await handleFlowStepError(flowStep);
+          if (!(await retryPasswordAfterManualStep(flowStep))) {
+            return await handleFlowStepError(flowStep);
+          }
         }
 
         const afterStepResult = await finishDetectedResultUnlessStepCanContinue(
@@ -278,6 +333,30 @@ export class LoginRunner {
   private async click(session: BrowserSession, locator: string): Promise<void> {
     await session.focusLocator?.(locator, 750);
     await session.click(locator);
+  }
+
+  private async waitForVisibleLocator(
+    session: BrowserSession,
+    locator: string,
+    timeoutMs: number,
+    pollMs: number
+  ): Promise<boolean> {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    const interval = Math.max(1, pollMs);
+    while (Date.now() < deadline) {
+      await this.sleep(interval);
+      if (await session.isVisible(locator)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 }
 

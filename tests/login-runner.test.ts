@@ -9,6 +9,10 @@ class FakeSession implements BrowserSession {
   focusTimeouts: Array<number | undefined> = [];
   manualAfterLoginClick = false;
   requireFocusBeforeFill = false;
+  private readonly revealAfterVisibilityChecks = new Map<string, number>();
+  private readonly revealOnFillError = new Map<string, string[]>();
+  private readonly throwOnceOnFillLocators = new Set<string>();
+  private readonly visibilityChecks = new Map<string, number>();
 
   constructor(
     private current: string,
@@ -32,7 +36,17 @@ class FakeSession implements BrowserSession {
   }
 
   async fill(locator: string, value: string): Promise<void> {
+    if (this.throwOnceOnFillLocators.has(locator)) {
+      this.throwOnceOnFillLocators.delete(locator);
+      for (const visibleLocator of this.revealOnFillError.get(locator) ?? []) {
+        this.visibleLocators.add(visibleLocator);
+      }
+      throw new Error(`Locator not ready yet: ${locator}`);
+    }
     if (this.throwOnFillLocators.has(locator)) {
+      for (const visibleLocator of this.revealOnFillError.get(locator) ?? []) {
+        this.visibleLocators.add(visibleLocator);
+      }
       throw new Error(`Locator not found: ${locator}`);
     }
     if (this.requireFocusBeforeFill && !this.focusedLocators.includes(locator)) {
@@ -57,7 +71,25 @@ class FakeSession implements BrowserSession {
     }
   }
 
+  revealLocatorAfterVisibilityChecks(locator: string, checks: number): void {
+    this.revealAfterVisibilityChecks.set(locator, checks);
+  }
+
+  throwOnceAndRevealOnFill(locator: string, visibleLocators: string[]): void {
+    this.throwOnceOnFillLocators.add(locator);
+    this.revealOnFillError.set(locator, visibleLocators);
+  }
+
   async isVisible(locator: string): Promise<boolean> {
+    if (!this.visibleLocators.has(locator)) {
+      const checks = (this.visibilityChecks.get(locator) ?? 0) + 1;
+      this.visibilityChecks.set(locator, checks);
+      const revealAfterChecks = this.revealAfterVisibilityChecks.get(locator);
+      if (revealAfterChecks !== undefined && checks >= revealAfterChecks) {
+        this.visibleLocators.add(locator);
+      }
+    }
+
     return this.visibleLocators.has(locator);
   }
 
@@ -340,6 +372,97 @@ describe("LoginRunner", () => {
     expect(messages).toContain("已填写密码字段。");
     expect(JSON.stringify(run.steps)).not.toContain("owner@gmail.com");
     expect(JSON.stringify(run.steps)).not.toContain("google-password");
+  });
+
+  it("continues filling the password after manual verification reveals the password field later", async () => {
+    const verificationRule = "text=需要完成验证";
+    const browser = new FakeBrowserController(
+      "about:blank",
+      "manual",
+      new Set(["button:has-text('Google')", "input[type=email]"]),
+      new Map([["#identifierNext", [verificationRule]]])
+    );
+    browser.session.revealLocatorAfterVisibilityChecks("input[type=password]", 2);
+    const runner = new LoginRunner(browser, { manualContinueWaitMs: 50, manualContinuePollMs: 1 });
+    const input = context();
+    input.platform = {
+      ...input.platform,
+      loginUrl: "https://www.dola.com/chat/?from_logout=1",
+      allowedOrigins: ["https://www.dola.com", "https://accounts.google.com"]
+    };
+    input.adapter = {
+      ...input.adapter,
+      authMode: "flow_password",
+      usernameLocator: "",
+      passwordLocator: "",
+      submitLocator: "",
+      flowSteps: [
+        { type: "click", locator: "button:has-text('Google')" },
+        { type: "fill_username", locator: "input[type=email]" },
+        { type: "click", locator: "#identifierNext" },
+        { type: "fill_password", locator: "input[type=password]" }
+      ],
+      manualRules: [
+        { type: "selector_visible", value: verificationRule }
+      ]
+    };
+    input.credentials = {
+      username: "owner@gmail.com",
+      password: "google-password"
+    };
+
+    const run = await runner.run(input);
+
+    expect(run.status).toBe("manual_handoff");
+    expect(run.requiresManual).toBe(true);
+    expect(browser.session.filled).toContainEqual({ locator: "input[type=password]", value: "google-password" });
+    expect(run.steps.map((item) => item.message)).toContain("已填写密码字段。");
+  });
+
+  it("retries filling the password when verification appears after the first password fill attempt", async () => {
+    const verificationRule = "text=需要完成验证";
+    const browser = new FakeBrowserController(
+      "about:blank",
+      "manual",
+      new Set(["button:has-text('Google')", "input[type=email]"])
+    );
+    browser.session.throwOnceAndRevealOnFill("input[type=password]", [verificationRule]);
+    browser.session.revealLocatorAfterVisibilityChecks("input[type=password]", 2);
+    const runner = new LoginRunner(browser, { manualContinueWaitMs: 50, manualContinuePollMs: 1 });
+    const input = context();
+    input.platform = {
+      ...input.platform,
+      loginUrl: "https://www.dola.com/chat/?from_logout=1",
+      allowedOrigins: ["https://www.dola.com", "https://accounts.google.com"]
+    };
+    input.adapter = {
+      ...input.adapter,
+      authMode: "flow_password",
+      usernameLocator: "",
+      passwordLocator: "",
+      submitLocator: "",
+      flowSteps: [
+        { type: "click", locator: "button:has-text('Google')" },
+        { type: "fill_username", locator: "input[type=email]" },
+        { type: "click", locator: "#identifierNext" },
+        { type: "fill_password", locator: "input[type=password]" }
+      ],
+      manualRules: [
+        { type: "selector_visible", value: verificationRule }
+      ]
+    };
+    input.credentials = {
+      username: "owner@gmail.com",
+      password: "google-password"
+    };
+
+    const run = await runner.run(input);
+
+    expect(run.status).toBe("manual_handoff");
+    expect(run.requiresManual).toBe(true);
+    expect(browser.session.filled).toContainEqual({ locator: "input[type=password]", value: "google-password" });
+    expect(run.steps.map((item) => item.message)).toContain("检测到人工验证；验证完成后会继续等待密码框出现并自动填充。");
+    expect(run.steps.map((item) => item.message)).toContain("已填写密码字段。");
   });
 
   it("describes unsafe browser blocks as manual handoff instead of a password failure", async () => {

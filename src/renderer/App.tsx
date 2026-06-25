@@ -359,6 +359,26 @@ export function App() {
     }
   }
 
+  async function handleOpenProfileTemplate() {
+    if (!bridge) return;
+    try {
+      const result = (await bridge.openProfileTemplate()) as { profilePath: string };
+      addLog("success", `已打开浏览器模板窗口。安装扩展后关闭该窗口；新建账号会复制模板。路径：${result.profilePath}`);
+    } catch (error) {
+      addLog("error", error instanceof Error ? error.message : "打开浏览器模板失败。");
+    }
+  }
+
+  async function handleOpenCameraPermissions() {
+    if (!bridge) return;
+    try {
+      await bridge.openCameraPermissions();
+      addLog("info", "已打开系统相机权限设置。请允许 Google Chrome 使用摄像头，然后回到验证页面重试。");
+    } catch (error) {
+      addLog("error", error instanceof Error ? error.message : "打开系统相机权限设置失败。");
+    }
+  }
+
   async function handleSaveAdapter(event: FormEvent) {
     event.preventDefault();
     if (!bridge || !selectedPlatformId) return;
@@ -537,6 +557,26 @@ export function App() {
     await refresh();
   }
 
+  async function handleResetAccountProfile(accountId: string) {
+    if (
+      !bridge ||
+      !confirm("确认用浏览器模板重置这个账号的 Profile？这会删除该账号当前浏览器会话、Cookie 和已保存的网页登录状态。")
+    ) {
+      return;
+    }
+
+    const account = accounts.find((item) => item.id === accountId);
+    try {
+      const result = (await bridge.resetAccountProfileFromTemplate(accountId)) as { profilePath: string };
+      setAccountRunFeedback(accountId, { level: "success", message: "已套用浏览器模板" });
+      addLog("success", `${account ? getAccountLabel(account) : "账号"}：已用模板重置 Profile。路径：${result.profilePath}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "重置 Profile 失败。";
+      setAccountRunFeedback(accountId, { level: "error", message });
+      addLog("error", `${account ? getAccountLabel(account) : "账号"}：${message}`);
+    }
+  }
+
   async function handleDeletePlatform(platform: Platform) {
     if (
       !bridge ||
@@ -642,6 +682,12 @@ export function App() {
         <details className="advanced-panel">
           <summary>高级配置</summary>
           <button type="button" onClick={() => void handleCreateDolaPreset()}>创建手动会话预设</button>
+          <div className="stacked-form">
+            <h2>浏览器模板</h2>
+            <p className="hint">在模板窗口里安装并固定扩展。打开账号浏览器时，如果账号 Profile 缺少模板扩展，会先自动套用模板。</p>
+            <button type="button" onClick={() => void handleOpenProfileTemplate()}>打开模板浏览器</button>
+            <button type="button" onClick={() => void handleOpenCameraPermissions()}>打开系统相机权限</button>
+          </div>
           <form className="stacked-form" onSubmit={handleCreatePlatform}>
             <h2>添加平台</h2>
             <input required value={platformForm.name} onChange={(event) => setPlatformForm({ ...platformForm, name: event.target.value })} placeholder="平台名称" />
@@ -779,6 +825,7 @@ export function App() {
               <span>标签: {selectedAccount.tags.join(", ") || "-"}</span>
               <span>Profile: {selectedAccount.profileId.slice(0, 8)}</span>
               <span>状态: {accountFeedback[selectedAccount.id]?.message ?? selectedAccount.status}</span>
+              <button type="button" onClick={() => void handleResetAccountProfile(selectedAccount.id)}>用模板重置 Profile</button>
               <button className="danger" type="button" onClick={() => void handleDeleteAccount(selectedAccount.id)}>删除记录</button>
             </div>
           ) : (
