@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { spawn } from "node:child_process";
-import type { LoginRun, Platform } from "../../shared/models.js";
+import type { BundledChromeExtensionStatus, LoginRun, Platform } from "../../shared/models.js";
 import { createChromeExtensionArgs } from "./chrome-launch-options.js";
 import { createChromeLaunchCommands } from "./chrome-executable.js";
 
@@ -21,7 +21,10 @@ export interface ManualSessionRunInput {
 }
 
 export class ManualSessionRunner {
-  constructor(private readonly opener: ManualBrowserOpener) {}
+  constructor(
+    private readonly opener: ManualBrowserOpener,
+    private readonly options: { chromeExtensionStatus?: BundledChromeExtensionStatus } = {}
+  ) {}
 
   async run(input: ManualSessionRunInput): Promise<LoginRun> {
     const run = this.createRun(input.accountId);
@@ -29,6 +32,11 @@ export class ManualSessionRunner {
       run.status = status;
       run.steps.push({ at: new Date().toISOString(), status, message });
     };
+
+    if (this.options.chromeExtensionStatus) {
+      run.chromeExtensionStatus = this.options.chromeExtensionStatus;
+      step("opening_browser", this.options.chromeExtensionStatus.message);
+    }
 
     step("opening_browser", "正在用普通 Chrome 打开该账号的独立 Profile。");
     try {

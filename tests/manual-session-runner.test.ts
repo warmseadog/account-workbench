@@ -51,6 +51,35 @@ describe("ManualSessionRunner", () => {
     expect(run.steps.map((step) => step.message).join("\n")).toContain("普通 Chrome");
   });
 
+  it("records missing bundled extension status without blocking manual handoff", async () => {
+    const opener = new RecordingManualBrowserOpener();
+    const runner = new ManualSessionRunner(opener, {
+      chromeExtensionStatus: {
+        state: "missing",
+        count: 0,
+        paths: [],
+        message: "未检测到内置浏览器插件；仍可继续上号，部分账号可能需要手动处理。"
+      }
+    });
+
+    const run = await runner.run({
+      accountId: "account-1",
+      profilePath: "/tmp/account-workbench/profile-1",
+      platform: platform()
+    });
+
+    expect(opener.requests).toHaveLength(1);
+    expect(run.status).toBe("manual_handoff");
+    expect(run.chromeExtensionStatus).toEqual({
+      state: "missing",
+      count: 0,
+      paths: [],
+      message: "未检测到内置浏览器插件；仍可继续上号，部分账号可能需要手动处理。"
+    });
+    expect(run.steps[0]?.message).toBe("未检测到内置浏览器插件；仍可继续上号，部分账号可能需要手动处理。");
+    expect(run.steps[1]?.message).toContain("正在用普通 Chrome 打开");
+  });
+
   it("explains Chrome startup failures without implying a window was already open", async () => {
     const runner = new ManualSessionRunner(new ThrowingManualBrowserOpener());
 

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { AccountDetail, AccountSummary } from "../main/services/workbench-service";
-import type { LoginAdapter, LoginAuthMode, LoginRun, Platform } from "../shared/models";
+import type { BundledChromeExtensionStatus, LoginAdapter, LoginAuthMode, LoginRun, Platform } from "../shared/models";
 import {
   MAX_BULK_LAUNCH_ACCOUNTS,
   pruneBulkSelection,
@@ -62,6 +62,7 @@ export interface OperatorWorkbenchViewProps {
   activeRuns: number;
   accountDetails: Record<string, AccountDetail>;
   accountFeedback: Record<string, RunFeedback>;
+  chromeExtensionStatus: BundledChromeExtensionStatus | undefined;
   accounts: AccountSummary[];
   accountForm: typeof emptyAccountForm;
   adapterForm: typeof emptyAdapterForm;
@@ -153,6 +154,7 @@ export function App() {
   const [selectedBulkAccountIds, setSelectedBulkAccountIds] = useState<string[]>([]);
   const [accountFeedback, setAccountFeedback] = useState<Record<string, RunFeedback>>({});
   const [accountDetails, setAccountDetails] = useState<Record<string, AccountDetail>>({});
+  const [chromeExtensionStatus, setChromeExtensionStatus] = useState<BundledChromeExtensionStatus>();
   const [bulkCount, setBulkCount] = useState(5);
   const [bulkStartIndex, setBulkStartIndex] = useState(1);
 
@@ -269,12 +271,14 @@ export function App() {
     try {
       const nextPlatforms = await bridge.listPlatforms();
       const effectivePlatformId = selectedPlatformId ?? getDefaultPlatformId(nextPlatforms);
-      const [nextAccounts, currentAdapter] = await Promise.all([
+      const [nextAccounts, currentAdapter, nextChromeExtensionStatus] = await Promise.all([
         bridge.listAccounts(effectivePlatformId),
-        effectivePlatformId ? bridge.getLoginAdapter(effectivePlatformId) : Promise.resolve(undefined)
+        effectivePlatformId ? bridge.getLoginAdapter(effectivePlatformId) : Promise.resolve(undefined),
+        bridge.getChromeExtensionStatus()
       ]);
       setPlatforms(nextPlatforms);
       setAccounts(nextAccounts);
+      setChromeExtensionStatus(nextChromeExtensionStatus);
       if (!selectedPlatformId && effectivePlatformId) {
         setSelectedPlatformId(effectivePlatformId);
       }
@@ -677,6 +681,7 @@ export function App() {
       activeRuns={activeRuns}
       accountDetails={accountDetails}
       accountFeedback={accountFeedback}
+      chromeExtensionStatus={chromeExtensionStatus}
       accountForm={accountForm}
       accounts={accounts}
       adapterForm={adapterForm}
@@ -731,6 +736,7 @@ export function OperatorWorkbenchView({
   activeRuns,
   accountDetails,
   accountFeedback,
+  chromeExtensionStatus,
   accountForm,
   accounts,
   adapterForm,
@@ -801,6 +807,7 @@ export function OperatorWorkbenchView({
           <span>账号 {visibleAccounts.length}</span>
           <span>已选 {selectedBulkAccountIds.length}</span>
           <span>运行中 {activeRuns}</span>
+          <span>插件 {chromeExtensionStatus?.message ?? "检测中"}</span>
         </div>
       </header>
 

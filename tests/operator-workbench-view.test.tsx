@@ -32,6 +32,12 @@ function createProps(overrides: Partial<OperatorWorkbenchViewProps> = {}): Opera
       }
     },
     accountFeedback: {},
+    chromeExtensionStatus: {
+      state: "available",
+      count: 1,
+      paths: ["/opt/account-workbench/extensions/helper"],
+      message: "已内置 1 个浏览器插件，上号浏览器启动时会自动加载。"
+    },
     accountForm: {
       displayName: "",
       username: "",
@@ -208,5 +214,12 @@ describe("OperatorWorkbenchView", () => {
     expect(html).toContain("otp-secret");
     expect(html).toContain("2FA 密钥: otp-secret");
     expect(html).not.toContain("验证信息: otp-secret");
+  });
+
+  it("shows bundled extension status to operators", () => {
+    const html = renderToStaticMarkup(<OperatorWorkbenchView {...createProps()} />);
+
+    expect(html).toContain("插件");
+    expect(html).toContain("已内置 1 个浏览器插件");
   });
 });

@@ -9,7 +9,8 @@ import { CryptoVault } from "./crypto/vault.js";
 import { ProfileManager } from "./profiles/profile-manager.js";
 import { SqliteStore } from "./storage/sqlite-store.js";
 import { createAppRuntimeConfig, getDevMasterPassword } from "./app-runtime.js";
-import { getBundledChromeExtensionPaths, getBundledProfileTemplatePath } from "./runtime-resources.js";
+import { getBundledChromeExtensionPaths, getBundledChromeExtensionStatus, getBundledProfileTemplatePath } from "./runtime-resources.js";
+import { createBundledChromeExtensionStatus } from "./runs/chrome-extension-status.js";
 import {
   WorkbenchService,
   type CreateAccountInput,
@@ -49,8 +50,8 @@ function getProfileTemplatePath(): string {
   return path.join(app.getPath("userData"), "profile-template", "user-data");
 }
 
-function createSystemChromeOpener(): SystemChromeProfileOpener {
-  return new SystemChromeProfileOpener({ extensionPaths: getBundledChromeExtensionPaths() });
+function createSystemChromeOpener(extensionPaths = getBundledChromeExtensionPaths()): SystemChromeProfileOpener {
+  return new SystemChromeProfileOpener({ extensionPaths });
 }
 
 async function createWindow(): Promise<void> {
@@ -70,6 +71,7 @@ ipcMain.handle("vault:unlock", (_event, masterPassword: string) => {
 });
 
 ipcMain.handle("app:config", () => createAppRuntimeConfig(process.env));
+ipcMain.handle("extensions:status", () => getBundledChromeExtensionStatus());
 
 ipcMain.handle("vault:dev-unlock", () => {
   const config = createAppRuntimeConfig(process.env);
@@ -138,11 +140,13 @@ ipcMain.handle("adapters:get", (_event, platformId: string) => requireService().
 ipcMain.handle("runs:launch", async (_event, accountId: string) => {
   const active = requireService();
   const extensionPaths = getBundledChromeExtensionPaths();
+  const chromeExtensionStatus = createBundledChromeExtensionStatus(extensionPaths);
   const launcher = new AccountLoginLauncher({
     service: active,
     browserControllerFactory: () => new PlaywrightBrowserController({ channel: "chrome", extensionPaths }),
     normalChromeBrowserControllerFactory: () => new ChromeDebugBrowserController({ extensionPaths }),
-    manualSessionRunner: new ManualSessionRunner(createSystemChromeOpener())
+    manualSessionRunner: new ManualSessionRunner(createSystemChromeOpener(extensionPaths), { chromeExtensionStatus }),
+    chromeExtensionStatus
   });
   return launcher.launch(accountId);
 });

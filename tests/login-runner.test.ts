@@ -197,6 +197,29 @@ describe("LoginRunner", () => {
     expect(JSON.stringify(run.steps)).not.toContain("secret-password");
   });
 
+  it("records bundled extension status before opening the profile browser", async () => {
+    const browser = new FakeBrowserController("chrome://newtab/", "manual");
+    const runner = new LoginRunner(browser, {
+      chromeExtensionStatus: {
+        state: "available",
+        count: 1,
+        paths: ["/opt/account-workbench/extensions/helper"],
+        message: "已内置 1 个浏览器插件，上号浏览器启动时会自动加载。"
+      }
+    });
+
+    const run = await runner.run(context());
+
+    expect(run.chromeExtensionStatus).toEqual({
+      state: "available",
+      count: 1,
+      paths: ["/opt/account-workbench/extensions/helper"],
+      message: "已内置 1 个浏览器插件，上号浏览器启动时会自动加载。"
+    });
+    expect(run.steps[0]?.message).toBe("已内置 1 个浏览器插件，上号浏览器启动时会自动加载。");
+    expect(run.steps[1]?.message).toContain("正在打开该账号的独立浏览器 Profile");
+  });
+
   it("treats Chrome startup pages as blank and navigates to the configured login URL", async () => {
     const browser = new FakeBrowserController("chrome://newtab/", "manual");
     const runner = new LoginRunner(browser);

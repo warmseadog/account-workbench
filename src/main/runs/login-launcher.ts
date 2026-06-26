@@ -1,6 +1,6 @@
 import { LoginRunner, type BrowserController } from "./login-runner.js";
 import type { ManualSessionRunner } from "./manual-session-runner.js";
-import type { AccountSecrets, LoginAdapter, LoginRun, Platform } from "../../shared/models.js";
+import type { AccountSecrets, BundledChromeExtensionStatus, LoginAdapter, LoginRun, Platform } from "../../shared/models.js";
 import type { AccountSummary } from "../services/workbench-service.js";
 
 export interface LoginLaunchService {
@@ -16,6 +16,7 @@ export interface AccountLoginLauncherOptions {
   browserControllerFactory: () => BrowserController;
   normalChromeBrowserControllerFactory: () => BrowserController;
   manualSessionRunner: ManualSessionRunner;
+  chromeExtensionStatus?: BundledChromeExtensionStatus;
 }
 
 export type LoginLaunchMode = "manual_session" | "normal_chrome_flow" | "playwright_flow";
@@ -44,7 +45,8 @@ export class AccountLoginLauncher {
 
     return new LoginRunner(browserController, {
       manualContinueWaitMs: 90_000,
-      manualContinuePollMs: 500
+      manualContinuePollMs: 500,
+      chromeExtensionStatus: this.options.chromeExtensionStatus
     }).run({
       accountId,
       platform,

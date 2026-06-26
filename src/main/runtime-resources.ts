@@ -1,6 +1,8 @@
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
+import type { BundledChromeExtensionStatus } from "../shared/models.js";
+import { createBundledChromeExtensionStatus } from "./runs/chrome-extension-status.js";
 
 export function getRuntimeResourcesRoot(): string {
   if (app.isPackaged) {
@@ -17,6 +19,10 @@ export function getBundledProfileTemplatePath(resourcesRoot = getRuntimeResource
 
 export function getBundledChromeExtensionPaths(resourcesRoot = getRuntimeResourcesRoot()): string[] {
   return findUnpackedChromeExtensions(path.join(resourcesRoot, "chrome-extensions"));
+}
+
+export function getBundledChromeExtensionStatus(resourcesRoot = getRuntimeResourcesRoot()): BundledChromeExtensionStatus {
+  return createBundledChromeExtensionStatus(getBundledChromeExtensionPaths(resourcesRoot));
 }
 
 export function findUnpackedChromeExtensions(extensionsRoot: string): string[] {

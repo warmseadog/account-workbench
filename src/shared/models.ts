@@ -111,6 +111,15 @@ export interface LoginRunStep {
   message: string;
 }
 
+export type BundledChromeExtensionState = "available" | "missing";
+
+export interface BundledChromeExtensionStatus {
+  state: BundledChromeExtensionState;
+  count: number;
+  paths: string[];
+  message: string;
+}
+
 export interface LoginRun {
   id: EntityId;
   accountId: EntityId;
@@ -118,6 +127,7 @@ export interface LoginRun {
   startedAt: string;
   endedAt?: string;
   steps: LoginRunStep[];
+  chromeExtensionStatus?: BundledChromeExtensionStatus;
   errorCode?: string;
   requiresManual: boolean;
 }

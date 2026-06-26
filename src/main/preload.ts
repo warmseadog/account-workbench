@@ -8,6 +8,7 @@ import type {
 
 const accountWorkbench = {
   getAppConfig: () => ipcRenderer.invoke("app:config"),
+  getChromeExtensionStatus: () => ipcRenderer.invoke("extensions:status"),
   unlockVault: (masterPassword: string) => ipcRenderer.invoke("vault:unlock", masterPassword),
   devUnlockVault: () => ipcRenderer.invoke("vault:dev-unlock"),
   pickAccountFile: () => ipcRenderer.invoke("files:pick-account-file"),

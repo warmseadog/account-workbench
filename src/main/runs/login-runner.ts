@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { Page } from "playwright";
 import { LoginAdapterRules } from "../adapters/login-adapter.js";
-import type { AccountSecrets, LoginAdapter, LoginFlowStep, LoginRun, LoginRunStatus, Platform } from "../../shared/models.js";
+import type {
+  AccountSecrets,
+  BundledChromeExtensionStatus,
+  LoginAdapter,
+  LoginFlowStep,
+  LoginRun,
+  LoginRunStatus,
+  Platform
+} from "../../shared/models.js";
 import { createChromeExtensionArgs } from "./chrome-launch-options.js";
 
 export type LoginResult = "success" | "failure" | "manual" | "unknown";
@@ -40,6 +48,7 @@ export interface BrowserController {
 export interface LoginRunnerOptions {
   manualContinueWaitMs?: number;
   manualContinuePollMs?: number;
+  chromeExtensionStatus?: BundledChromeExtensionStatus;
 }
 
 export class LoginRunner {
@@ -57,6 +66,10 @@ export class LoginRunner {
       run.status = status;
       run.steps.push({ at: new Date().toISOString(), status, message });
     };
+    if (this.options.chromeExtensionStatus) {
+      run.chromeExtensionStatus = this.options.chromeExtensionStatus;
+      step("opening_browser", this.options.chromeExtensionStatus.message);
+    }
     const fail = (errorCode: string, message: string): LoginRun => {
       step("failed", message);
       run.errorCode = errorCode;
