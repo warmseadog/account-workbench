@@ -7,6 +7,7 @@ class FakeSession implements BrowserSession {
   clicked: string[] = [];
   focusedLocators: string[] = [];
   focusTimeouts: Array<number | undefined> = [];
+  totpHelpers: Array<{ url: string; secret: string }> = [];
   manualAfterLoginClick = false;
   requireFocusBeforeFill = false;
   private readonly revealAfterVisibilityChecks = new Map<string, number>();
@@ -69,6 +70,10 @@ class FakeSession implements BrowserSession {
     if (locator === "button:has-text('Google')") {
       this.current = "https://accounts.google.com/v3/signin/identifier";
     }
+  }
+
+  async openTotpHelper(request: { url: string; secret: string }): Promise<void> {
+    this.totpHelpers.push(request);
   }
 
   revealLocatorAfterVisibilityChecks(locator: string, checks: number): void {
@@ -188,6 +193,7 @@ describe("LoginRunner", () => {
 
     expect(run.status).toBe("failed");
     expect(run.errorCode).toBe("browser_profile_unavailable");
+    expect(run.steps.at(-1)?.message).toContain("未检测到或无法启动 Google Chrome");
     expect(JSON.stringify(run.steps)).not.toContain("secret-password");
   });
 
@@ -211,6 +217,29 @@ describe("LoginRunner", () => {
     expect(run.status).toBe("manual_handoff");
     expect(run.requiresManual).toBe(true);
     expect(browser.session.filled).toHaveLength(2);
+  });
+
+  it("opens and submits the 2FA.CN helper when the account has a verification secret", async () => {
+    const browser = new FakeBrowserController("https://example.com/login", "manual");
+    const runner = new LoginRunner(browser);
+    const input = context();
+    input.credentials = {
+      username: "owner@example.com",
+      password: "secret-password",
+      verificationSecret: "OTPSECRETVALUE"
+    };
+
+    const run = await runner.run(input);
+
+    expect(run.status).toBe("manual_handoff");
+    expect(browser.session.totpHelpers).toEqual([
+      {
+        url: "https://2fa.cn/",
+        secret: "OTPSECRETVALUE"
+      }
+    ]);
+    expect(run.steps.map((step) => step.message)).toContain("已打开 2FA.CN 并提交该账号 2FA 密钥。");
+    expect(JSON.stringify(run.steps)).not.toContain("OTPSECRETVALUE");
   });
 
   it("redacts secrets from run steps", async () => {

@@ -230,6 +230,19 @@ describe("WorkbenchService", () => {
     expect(JSON.stringify(service.dumpRawAccountRow(account.id))).not.toContain("google-password");
   });
 
+  it("ensures the default Dola Google preset without creating duplicates", () => {
+    const service = createService();
+
+    const first = service.ensureDefaultDolaGooglePreset();
+    const second = service.ensureDefaultDolaGooglePreset();
+
+    expect(first.platform.id).toBe(second.platform.id);
+    expect(first.platform.loginUrl).toBe("https://www.dola.com/chat/?from_logout=1");
+    expect(first.platform.allowedOrigins).toEqual(["https://www.dola.com", "https://accounts.google.com"]);
+    expect(second.adapter.authMode).toBe("flow_password");
+    expect(service.listPlatforms()).toHaveLength(1);
+  });
+
   it("imports Dola Google accounts from local credential files without storing plaintext", () => {
     const service = createService();
     const dir = mkdtempSync(path.join(tmpdir(), "account-workbench-import-"));
@@ -290,6 +303,11 @@ describe("WorkbenchService", () => {
       verificationSecret: "totp-secret-value",
       region: "United States",
       year: "2020"
+    });
+    expect(service.getAccountSecrets(account.id)).toEqual({
+      username: "owner1@gmail.com",
+      password: "password-one",
+      verificationSecret: "totp-secret-value"
     });
     expect(JSON.stringify(service.dumpRawAccountRow(account.id))).not.toContain("totp-secret-value");
   });

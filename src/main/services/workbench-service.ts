@@ -305,6 +305,16 @@ export class WorkbenchService {
     return { platform, adapter };
   }
 
+  ensureDefaultDolaGooglePreset(): { platform: Platform; adapter: LoginAdapter } {
+    const platform = this.ensureDolaGooglePasswordPlatform();
+    const adapter = this.getLoginAdapter(platform.id);
+    if (!adapter) {
+      throw new Error("Dola Google 自动填充规则初始化失败。");
+    }
+
+    return { platform, adapter };
+  }
+
   importDolaGoogleAccountsFromFile(input: ImportAccountsFromFileInput): ImportAccountsFromFileResult {
     const rows = this.parseCredentialFile(input.filePath);
     const platform = this.ensureDolaGooglePasswordPlatform();
@@ -463,11 +473,20 @@ export class WorkbenchService {
 
   getAccountSecrets(accountId: string): AccountSecrets {
     const row = this.requireAccountRow(accountId);
-
-    return {
-      username: this.vault.decryptSecret(JSON.parse(row.username_enc)),
-      password: row.password_enc ? this.vault.decryptSecret(JSON.parse(row.password_enc)) : undefined
+    const secretMeta = this.decryptAccountSecretMeta(row);
+    const secrets: AccountSecrets = {
+      username: this.vault.decryptSecret(JSON.parse(row.username_enc))
     };
+
+    if (row.password_enc) {
+      secrets.password = this.vault.decryptSecret(JSON.parse(row.password_enc));
+    }
+
+    if (secretMeta.verificationSecret) {
+      secrets.verificationSecret = secretMeta.verificationSecret;
+    }
+
+    return secrets;
   }
 
   dumpRawAccountRow(accountId: string): AccountRow {

@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { Page } from "playwright";
 import { LoginAdapterRules } from "../adapters/login-adapter.js";
 import type { AccountSecrets, LoginAdapter, LoginFlowStep, LoginRun, LoginRunStatus, Platform } from "../../shared/models.js";
+import { createChromeExtensionArgs } from "./chrome-launch-options.js";
 
 export type LoginResult = "success" | "failure" | "manual" | "unknown";
+
+const TOTP_HELPER_URL = "https://2fa.cn/";
 
 export interface LoginRunContext {
   accountId: string;
@@ -13,9 +16,15 @@ export interface LoginRunContext {
   credentials: AccountSecrets;
 }
 
+export interface TotpHelperRequest {
+  url: string;
+  secret: string;
+}
+
 export interface BrowserSession {
   currentUrl(): Promise<string>;
   goto(url: string): Promise<void>;
+  openTotpHelper?(request: TotpHelperRequest): Promise<void>;
   focusLocator?(locator: string, timeoutMs?: number): Promise<void>;
   fill(locator: string, value: string): Promise<void>;
   click(locator: string): Promise<void>;
@@ -84,9 +93,22 @@ export class LoginRunner {
     } catch {
       return fail(
         "browser_profile_unavailable",
-        "无法打开该账号的独立浏览器 Profile；如果这个账号的独立 Chrome 窗口已经打开，请先关闭该窗口后重试。"
+        "未检测到或无法启动 Google Chrome，或该账号独立 Profile 被占用；请确认已安装 Google Chrome，关闭残留 Chrome 进程后重试。"
       );
     }
+
+    if (context.credentials.verificationSecret && session.openTotpHelper) {
+      try {
+        await session.openTotpHelper({
+          url: TOTP_HELPER_URL,
+          secret: context.credentials.verificationSecret
+        });
+        step("opening_browser", "已打开 2FA.CN 并提交该账号 2FA 密钥。");
+      } catch {
+        step("opening_browser", "2FA.CN 自动提交失败；请在账号详情中复制 2FA 密钥后手动生成验证码。");
+      }
+    }
+
     const currentUrl = await session.currentUrl();
 
     if (this.isStartupUrl(currentUrl)) {
@@ -361,14 +383,15 @@ export class LoginRunner {
 }
 
 export class PlaywrightBrowserController implements BrowserController {
-  constructor(private readonly options: { channel?: "chrome" | "msedge"; headless?: boolean } = {}) {}
+  constructor(private readonly options: { channel?: "chrome" | "msedge"; headless?: boolean; extensionPaths?: string[] } = {}) {}
 
   async openPersistentSession(profilePath: string): Promise<BrowserSession> {
     const { chromium } = await import("playwright");
     const context = await chromium.launchPersistentContext(profilePath, {
       channel: this.options.channel ?? "chrome",
       headless: this.options.headless ?? false,
-      viewport: null
+      viewport: null,
+      args: createChromeExtensionArgs(this.options.extensionPaths)
     });
     const page = context.pages()[0] ?? (await context.newPage());
     return new PlaywrightBrowserSession(page);
@@ -384,6 +407,26 @@ export class PlaywrightBrowserSession implements BrowserSession {
 
   async goto(url: string): Promise<void> {
     await this.page.goto(url, { waitUntil: "domcontentloaded" });
+  }
+
+  async openTotpHelper(request: TotpHelperRequest): Promise<void> {
+    const helperPage = await this.page.context().newPage();
+    await helperPage.goto(request.url, { waitUntil: "domcontentloaded" });
+
+    const textArea = helperPage.locator("textarea").first();
+    if (await textArea.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await textArea.fill(request.secret, { timeout: 10_000 });
+    } else {
+      await helperPage
+        .locator("input[placeholder*='2FA'], input[placeholder*='Secret'], input:not([type='hidden']):not([type='submit']):not([type='button'])")
+        .first()
+        .fill(request.secret, { timeout: 10_000 });
+    }
+
+    await helperPage
+      .locator("button:has-text('Submit'), button:has-text('提交'), input[type='submit']")
+      .first()
+      .click({ timeout: 10_000 });
   }
 
   async focusLocator(locator: string, timeoutMs = 2_000): Promise<void> {

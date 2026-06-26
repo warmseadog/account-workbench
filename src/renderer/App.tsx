@@ -56,8 +56,59 @@ const emptyAccountForm = {
   tags: ""
 };
 
-const defaultCredentialFilePath =
-  "/Users/wy/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_y4n4ti9i609h22_2b2c/temp/RWTemp/2026-06/737931ae46efbcd310450ddf2986b74a/100.txt";
+const defaultCredentialFilePath = "";
+
+export interface OperatorWorkbenchViewProps {
+  activeRuns: number;
+  accountDetails: Record<string, AccountDetail>;
+  accountFeedback: Record<string, RunFeedback>;
+  accounts: AccountSummary[];
+  accountForm: typeof emptyAccountForm;
+  adapterForm: typeof emptyAdapterForm;
+  bulkCount: number;
+  bulkRangeEnd: number;
+  bulkStartIndex: number;
+  credentialFilePath: string;
+  currentTargetUrl: string;
+  isFlowPasswordAdapter: boolean;
+  isManualSessionAdapter: boolean;
+  logs: UiLog[];
+  platformForm: typeof emptyPlatformForm;
+  platforms: Platform[];
+  selectedAccountId: string | undefined;
+  selectedBulkAccountIds: string[];
+  selectedBulkAccounts: AccountSummary[];
+  selectedPlatform: Platform | undefined;
+  selectedPlatformId: string | undefined;
+  visibleAccounts: AccountSummary[];
+  onAccountFormChange: (form: typeof emptyAccountForm) => void;
+  onAdapterFormChange: (form: typeof emptyAdapterForm) => void;
+  onBulkLaunch: () => void;
+  onBulkCountChange: (count: number) => void;
+  onBulkStartChange: (startIndex: number) => void;
+  onCreateAccount: (event: FormEvent) => void;
+  onCreateDolaGooglePasswordPreset: () => void;
+  onCreateDolaPreset: () => void;
+  onCreatePlatform: (event: FormEvent) => void;
+  onCredentialFilePathChange: (filePath: string) => void;
+  onDeleteAccount: (accountId: string) => void;
+  onDeletePlatform: (platform: Platform) => void;
+  onImportDolaGoogleAccounts: () => void;
+  onLaunch: (accountId: string) => void;
+  onOpenCameraPermissions: () => void;
+  onOpenProfileTemplate: () => void;
+  onOpenSession: (accountId: string) => void;
+  onPickCredentialFile: () => void;
+  onPlatformFormChange: (form: typeof emptyPlatformForm) => void;
+  onResetAccountProfile: (accountId: string) => void;
+  onSaveAdapter: (event: FormEvent) => void;
+  onSelectAccount: (accountId: string | undefined) => void;
+  onSelectBulkAccount: (accountId: string) => void;
+  onSelectCurrentBulkRange: () => void;
+  onSelectNextBulkRange: () => void;
+  onSelectPlatform: (platformId: string | undefined) => void;
+  onSetSelectedBulkAccountIds: (accountIds: string[]) => void;
+}
 
 function getDefaultPlatformId(platforms: Platform[]): string | undefined {
   return (
@@ -395,9 +446,9 @@ export function App() {
         failureRules: adapterForm.failureSelector ? [{ type: "selector_visible", value: adapterForm.failureSelector }] : [],
         manualRules: adapterForm.manualSelector ? [{ type: "selector_visible", value: adapterForm.manualSelector }] : []
       });
-      addLog("success", "登录适配器已保存。");
+      addLog("success", "自动填充规则已保存。");
     } catch (error) {
-      addLog("error", error instanceof Error ? error.message : "保存适配器失败。");
+      addLog("error", error instanceof Error ? error.message : "保存自动填充规则失败。");
     }
   }
 
@@ -545,7 +596,7 @@ export function App() {
   }
 
   async function handleDeleteAccount(accountId: string) {
-    if (!bridge || !confirm("只删除账号记录，不自动删除浏览器 Profile。确认删除？")) return;
+    if (!bridge || !confirm("只移除账号记录，不自动清理浏览器数据。确认移除？")) return;
     await bridge.deleteAccount(accountId);
     setSelectedAccountId(undefined);
     setAccountDetails((current) => {
@@ -553,14 +604,14 @@ export function App() {
       delete next[accountId];
       return next;
     });
-    addLog("success", "账号记录已删除。");
+    addLog("success", "账号记录已移除。");
     await refresh();
   }
 
   async function handleResetAccountProfile(accountId: string) {
     if (
       !bridge ||
-      !confirm("确认用浏览器模板重置这个账号的 Profile？这会删除该账号当前浏览器会话、Cookie 和已保存的网页登录状态。")
+      !confirm("确认重建这个账号的浏览器数据？这会清除该账号当前会话、Cookie 和已保存的网页登录状态。")
     ) {
       return;
     }
@@ -568,10 +619,10 @@ export function App() {
     const account = accounts.find((item) => item.id === accountId);
     try {
       const result = (await bridge.resetAccountProfileFromTemplate(accountId)) as { profilePath: string };
-      setAccountRunFeedback(accountId, { level: "success", message: "已套用浏览器模板" });
-      addLog("success", `${account ? getAccountLabel(account) : "账号"}：已用模板重置 Profile。路径：${result.profilePath}`);
+      setAccountRunFeedback(accountId, { level: "success", message: "浏览器数据已重建" });
+      addLog("success", `${account ? getAccountLabel(account) : "账号"}：浏览器数据已重建。路径：${result.profilePath}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "重置 Profile 失败。";
+      const message = error instanceof Error ? error.message : "重建浏览器数据失败。";
       setAccountRunFeedback(accountId, { level: "error", message });
       addLog("error", `${account ? getAccountLabel(account) : "账号"}：${message}`);
     }
@@ -580,7 +631,7 @@ export function App() {
   async function handleDeletePlatform(platform: Platform) {
     if (
       !bridge ||
-      !confirm(`确认删除平台「${platform.name}」？该平台下的账号记录也会一起删除，浏览器 Profile 文件不会自动删除。`)
+      !confirm(`确认移除平台「${platform.name}」？该平台下的账号记录也会一起移除，浏览器数据文件不会自动删除。`)
     ) {
       return;
     }
@@ -591,7 +642,7 @@ export function App() {
       setSelectedAccountId(undefined);
       setSelectedBulkAccountIds([]);
     }
-    addLog("success", `平台已删除：${platform.name}`);
+    addLog("success", `平台已移除：${platform.name}`);
     await refresh();
   }
 
@@ -622,90 +673,391 @@ export function App() {
   }
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <strong>账号工作台</strong>
-        <span>账号库：已解锁</span>
-        <span>浏览器服务：本地</span>
-        <span>运行中：{activeRuns}</span>
+    <OperatorWorkbenchView
+      activeRuns={activeRuns}
+      accountDetails={accountDetails}
+      accountFeedback={accountFeedback}
+      accountForm={accountForm}
+      accounts={accounts}
+      adapterForm={adapterForm}
+      bulkCount={bulkCount}
+      bulkRangeEnd={bulkRangeEnd}
+      bulkStartIndex={bulkStartIndex}
+      credentialFilePath={credentialFilePath}
+      currentTargetUrl={currentTargetUrl}
+      isFlowPasswordAdapter={isFlowPasswordAdapter}
+      isManualSessionAdapter={isManualSessionAdapter}
+      logs={logs}
+      platformForm={platformForm}
+      platforms={platforms}
+      selectedAccountId={selectedAccountId}
+      selectedBulkAccountIds={selectedBulkAccountIds}
+      selectedBulkAccounts={selectedBulkAccounts}
+      selectedPlatform={selectedPlatform}
+      selectedPlatformId={selectedPlatformId}
+      visibleAccounts={visibleAccounts}
+      onAccountFormChange={setAccountForm}
+      onAdapterFormChange={setAdapterForm}
+      onBulkLaunch={() => void handleBulkLaunch()}
+      onBulkCountChange={handleSelectBulkCount}
+      onBulkStartChange={handleSelectBulkStart}
+      onCreateAccount={handleCreateAccount}
+      onCreateDolaGooglePasswordPreset={() => void handleCreateDolaGooglePasswordPreset()}
+      onCreateDolaPreset={() => void handleCreateDolaPreset()}
+      onCreatePlatform={handleCreatePlatform}
+      onCredentialFilePathChange={setCredentialFilePath}
+      onDeleteAccount={(accountId) => void handleDeleteAccount(accountId)}
+      onDeletePlatform={(platform) => void handleDeletePlatform(platform)}
+      onImportDolaGoogleAccounts={() => void handleImportDolaGoogleAccounts()}
+      onLaunch={(accountId) => void handleLaunch(accountId)}
+      onOpenCameraPermissions={() => void handleOpenCameraPermissions()}
+      onOpenProfileTemplate={() => void handleOpenProfileTemplate()}
+      onOpenSession={(accountId) => void handleOpenSession(accountId)}
+      onPickCredentialFile={() => void handlePickCredentialFile()}
+      onPlatformFormChange={setPlatformForm}
+      onResetAccountProfile={(accountId) => void handleResetAccountProfile(accountId)}
+      onSaveAdapter={handleSaveAdapter}
+      onSelectAccount={setSelectedAccountId}
+      onSelectBulkAccount={toggleBulkSelection}
+      onSelectCurrentBulkRange={selectCurrentBulkRange}
+      onSelectNextBulkRange={selectNextBulkRange}
+      onSelectPlatform={setSelectedPlatformId}
+      onSetSelectedBulkAccountIds={setSelectedBulkAccountIds}
+    />
+  );
+}
+
+export function OperatorWorkbenchView({
+  activeRuns,
+  accountDetails,
+  accountFeedback,
+  accountForm,
+  accounts,
+  adapterForm,
+  bulkCount,
+  bulkRangeEnd,
+  bulkStartIndex,
+  credentialFilePath,
+  currentTargetUrl,
+  isFlowPasswordAdapter,
+  isManualSessionAdapter,
+  logs,
+  platformForm,
+  platforms,
+  selectedAccountId,
+  selectedBulkAccountIds,
+  selectedBulkAccounts,
+  selectedPlatform,
+  selectedPlatformId,
+  visibleAccounts,
+  onAccountFormChange,
+  onAdapterFormChange,
+  onBulkCountChange,
+  onBulkStartChange,
+  onCreateAccount,
+  onCreateDolaGooglePasswordPreset,
+  onCreateDolaPreset,
+  onCreatePlatform,
+  onCredentialFilePathChange,
+  onDeleteAccount,
+  onDeletePlatform,
+  onImportDolaGoogleAccounts,
+  onBulkLaunch,
+  onLaunch,
+  onOpenCameraPermissions,
+  onOpenProfileTemplate,
+  onOpenSession,
+  onPickCredentialFile,
+  onPlatformFormChange,
+  onResetAccountProfile,
+  onSaveAdapter,
+  onSelectAccount,
+  onSelectBulkAccount,
+  onSelectCurrentBulkRange,
+  onSelectNextBulkRange,
+  onSelectPlatform,
+  onSetSelectedBulkAccountIds
+}: OperatorWorkbenchViewProps) {
+  const selectedAccount = selectedAccountId
+    ? visibleAccounts.find((account) => account.id === selectedAccountId)
+    : undefined;
+  const selectedAccountDetail = selectedAccountId ? accountDetails[selectedAccountId] : undefined;
+  const recentLogs = logs.slice(0, 8);
+
+  function getVisibleAccountLabel(account: AccountSummary): string {
+    const rowNumber = visibleAccounts.findIndex((item) => item.id === account.id) + 1;
+    const prefix = rowNumber > 0 ? `#${rowNumber}` : "账号";
+    return `${prefix} ${account.usernamePreview}`;
+  }
+
+  return (
+    <main className="app-shell operator-shell">
+      <header className="topbar operator-topbar">
+        <div className="topbar-title">
+          <strong>运营执行台</strong>
+          <span>本地账号库已解锁</span>
+        </div>
+        <div className="topbar-metrics" aria-label="运行概览">
+          <span>账号 {visibleAccounts.length}</span>
+          <span>已选 {selectedBulkAccountIds.length}</span>
+          <span>运行中 {activeRuns}</span>
+        </div>
       </header>
 
-      <aside className="platform-pane">
-        <section className="side-section target-section">
-          <h2>目标网址</h2>
+      <aside className="platform-pane operator-sidebar">
+        <section className="operator-card target-section">
+          <div className="pane-title">
+            <span>当前目标</span>
+            <span>{selectedPlatform ? selectedPlatform.name : "全部账号"}</span>
+          </div>
           <div className="url-box">{currentTargetUrl}</div>
           <div className="side-meta">
-            <span>{selectedPlatform ? selectedPlatform.name : "全部账号"}</span>
-            <span>{visibleAccounts.length} 个账号</span>
+            <span>{visibleAccounts.length} 个可执行账号</span>
+            <span>{platforms.length} 个平台</span>
           </div>
-          <button type="button" onClick={() => void handleCreateDolaGooglePasswordPreset()}>初始化 Dola</button>
+          <button type="button" onClick={onCreateDolaGooglePasswordPreset}>
+            初始化 Dola
+          </button>
         </section>
 
-        <section className="side-section import-section">
-          <h2>导入账号文件</h2>
-          <input
-            value={credentialFilePath}
-            onChange={(event) => setCredentialFilePath(event.target.value)}
-            placeholder="本地账号文件路径"
-          />
-          <button type="button" onClick={() => void handlePickCredentialFile()}>选择本机文件</button>
-          <button className="primary-action" type="button" onClick={() => void handleImportDolaGoogleAccounts()}>导入</button>
-        </section>
-
-        <section className="side-section">
+        <section className="operator-card import-section">
           <div className="pane-title">
-            <span>平台</span>
+            <span>账号导入</span>
+            <span>本机文件</span>
+          </div>
+          <label className="field-block">
+            <span>账号文件路径</span>
+            <input
+              value={credentialFilePath}
+              onChange={(event) => onCredentialFilePathChange(event.target.value)}
+              placeholder="本地账号文件路径"
+            />
+          </label>
+          <div className="button-row">
+            <button type="button" onClick={onPickCredentialFile}>
+              选择文件
+            </button>
+            <button className="primary-action" type="button" onClick={onImportDolaGoogleAccounts}>
+              导入账号
+            </button>
+          </div>
+        </section>
+
+        <section className="operator-card">
+          <div className="pane-title">
+            <span>平台筛选</span>
             <span>{platforms.length}</span>
           </div>
-          <button className={!selectedPlatformId ? "platform-item active" : "platform-item"} onClick={() => setSelectedPlatformId(undefined)}>
+          <button className={!selectedPlatformId ? "platform-item active" : "platform-item"} onClick={() => onSelectPlatform(undefined)}>
             <span>全部账号</span>
             <small>{accounts.length} 个本地账号</small>
           </button>
           {platforms.map((platform) => (
-            <div key={platform.id} className={platform.id === selectedPlatformId ? "platform-row active" : "platform-row"}>
-              <button className="platform-select" onClick={() => setSelectedPlatformId(platform.id)}>
-                <span>{platform.name}</span>
-                <small>{platform.allowedOrigins[0]}</small>
-              </button>
-              <button
-                className="platform-delete danger"
-                type="button"
-                onClick={() => void handleDeletePlatform(platform)}
-                aria-label={`删除平台 ${platform.name}`}
-              >
-                删除
-              </button>
-            </div>
+            <button
+              key={platform.id}
+              className={platform.id === selectedPlatformId ? "platform-item active" : "platform-item"}
+              onClick={() => onSelectPlatform(platform.id)}
+            >
+              <span>{platform.name}</span>
+              <small>{platform.allowedOrigins[0]}</small>
+            </button>
           ))}
         </section>
 
-        <details className="advanced-panel">
-          <summary>高级配置</summary>
-          <button type="button" onClick={() => void handleCreateDolaPreset()}>创建手动会话预设</button>
-          <div className="stacked-form">
-            <h2>浏览器模板</h2>
-            <p className="hint">在模板窗口里安装并固定扩展。打开账号浏览器时，如果账号 Profile 缺少模板扩展，会先自动套用模板。</p>
-            <button type="button" onClick={() => void handleOpenProfileTemplate()}>打开模板浏览器</button>
-            <button type="button" onClick={() => void handleOpenCameraPermissions()}>打开系统相机权限</button>
+        <details className="maintenance-panel sidebar-maintenance">
+          <summary>管理员维护</summary>
+          <div className="maintenance-grid">
+            <form className="stacked-form compact-form" onSubmit={onSaveAdapter}>
+              <h2>自动填充规则</h2>
+              <select
+                disabled={!selectedPlatformId}
+                value={adapterForm.authMode}
+                onChange={(event) => onAdapterFormChange({ ...adapterForm, authMode: event.target.value as LoginAuthMode })}
+              >
+                <option value="password">账号密码自动填充</option>
+                <option value="manual_session">手动登录 / OAuth 会话复用</option>
+                <option value="flow_password">多步骤密码登录</option>
+              </select>
+              <input
+                disabled={!selectedPlatformId || isManualSessionAdapter || isFlowPasswordAdapter}
+                value={adapterForm.usernameLocator}
+                onChange={(event) => onAdapterFormChange({ ...adapterForm, usernameLocator: event.target.value })}
+                placeholder="账号字段定位"
+              />
+              <input
+                disabled={!selectedPlatformId || isManualSessionAdapter || isFlowPasswordAdapter}
+                value={adapterForm.passwordLocator}
+                onChange={(event) => onAdapterFormChange({ ...adapterForm, passwordLocator: event.target.value })}
+                placeholder="密码字段定位"
+              />
+              <input
+                disabled={!selectedPlatformId || isManualSessionAdapter || isFlowPasswordAdapter}
+                value={adapterForm.submitLocator}
+                onChange={(event) => onAdapterFormChange({ ...adapterForm, submitLocator: event.target.value })}
+                placeholder="登录按钮定位"
+              />
+              <input
+                disabled={!selectedPlatformId || !isManualSessionAdapter}
+                value={adapterForm.startLocator}
+                onChange={(event) => onAdapterFormChange({ ...adapterForm, startLocator: event.target.value })}
+                placeholder="登录入口定位"
+              />
+              <textarea
+                disabled={!selectedPlatformId || !isFlowPasswordAdapter}
+                value={adapterForm.flowSteps}
+                onChange={(event) => onAdapterFormChange({ ...adapterForm, flowSteps: event.target.value })}
+                placeholder={"多步骤流程，每行：类型|定位\nclick|button:has-text('Google')\nfill_username|input[type='email']\nfill_password|input[type='password']"}
+              />
+              <input
+                disabled={!selectedPlatformId}
+                value={adapterForm.successSelector}
+                onChange={(event) => onAdapterFormChange({ ...adapterForm, successSelector: event.target.value })}
+                placeholder="成功状态定位"
+              />
+              <input
+                disabled={!selectedPlatformId}
+                value={adapterForm.failureSelector}
+                onChange={(event) => onAdapterFormChange({ ...adapterForm, failureSelector: event.target.value })}
+                placeholder="失败状态定位"
+              />
+              <input
+                disabled={!selectedPlatformId}
+                value={adapterForm.manualSelector}
+                onChange={(event) => onAdapterFormChange({ ...adapterForm, manualSelector: event.target.value })}
+                placeholder="验证码或人工处理定位"
+              />
+              {isManualSessionAdapter && <p className="hint">此模式只打开独立浏览器，首次登录后复用该账号会话。</p>}
+              {isFlowPasswordAdapter && <p className="hint">此模式会填入账号密码，验证码、短信或 2FA 仍由人工完成。</p>}
+              <button disabled={!selectedPlatformId} type="submit">
+                保存规则
+              </button>
+            </form>
+
+            <form className="stacked-form compact-form" onSubmit={onCreateAccount}>
+              <h2>补录单个账号</h2>
+              <input
+                disabled={!selectedPlatformId}
+                required
+                value={accountForm.displayName}
+                onChange={(event) => onAccountFormChange({ ...accountForm, displayName: event.target.value })}
+                placeholder="显示名称"
+              />
+              <input
+                disabled={!selectedPlatformId}
+                required
+                value={accountForm.username}
+                onChange={(event) => onAccountFormChange({ ...accountForm, username: event.target.value })}
+                placeholder="账号或邮箱"
+              />
+              <input
+                disabled={!selectedPlatformId}
+                required={isFlowPasswordAdapter || !isManualSessionAdapter}
+                type="password"
+                value={accountForm.password}
+                onChange={(event) => onAccountFormChange({ ...accountForm, password: event.target.value })}
+                placeholder="登录密码，手动会话可留空"
+              />
+              <input
+                disabled={!selectedPlatformId}
+                value={accountForm.verificationSecret}
+                onChange={(event) => onAccountFormChange({ ...accountForm, verificationSecret: event.target.value })}
+                placeholder="验证信息 / 2FA Secret"
+              />
+              <input
+                disabled={!selectedPlatformId}
+                value={accountForm.extraCode}
+                onChange={(event) => onAccountFormChange({ ...accountForm, extraCode: event.target.value })}
+                placeholder="短码 / 附加字段"
+              />
+              <input
+                disabled={!selectedPlatformId}
+                value={accountForm.region}
+                onChange={(event) => onAccountFormChange({ ...accountForm, region: event.target.value })}
+                placeholder="地区"
+              />
+              <input
+                disabled={!selectedPlatformId}
+                value={accountForm.year}
+                onChange={(event) => onAccountFormChange({ ...accountForm, year: event.target.value })}
+                placeholder="年份"
+              />
+              <input
+                disabled={!selectedPlatformId}
+                value={accountForm.tags}
+                onChange={(event) => onAccountFormChange({ ...accountForm, tags: event.target.value })}
+                placeholder="标签，用英文逗号分隔"
+              />
+              <button disabled={!selectedPlatformId} type="submit">
+                保存账号
+              </button>
+            </form>
+
+            <div className="maintenance-section">
+              <h2>平台和当前账号</h2>
+              <div className="button-row wrap">
+                <button type="button" onClick={onCreateDolaPreset}>
+                  手动会话预设
+                </button>
+                <button type="button" onClick={onOpenProfileTemplate}>
+                  模板浏览器
+                </button>
+                <button type="button" onClick={onOpenCameraPermissions}>
+                  相机权限
+                </button>
+              </div>
+              <form className="stacked-form compact-form" onSubmit={onCreatePlatform}>
+                <input
+                  required
+                  value={platformForm.name}
+                  onChange={(event) => onPlatformFormChange({ ...platformForm, name: event.target.value })}
+                  placeholder="平台名称"
+                />
+                <input
+                  required
+                  value={platformForm.baseUrl}
+                  onChange={(event) => onPlatformFormChange({ ...platformForm, baseUrl: event.target.value })}
+                  placeholder="首页 URL"
+                />
+                <input
+                  required
+                  value={platformForm.loginUrl}
+                  onChange={(event) => onPlatformFormChange({ ...platformForm, loginUrl: event.target.value })}
+                  placeholder="登录页 URL"
+                />
+                <input
+                  required
+                  value={platformForm.allowedOrigins}
+                  onChange={(event) => onPlatformFormChange({ ...platformForm, allowedOrigins: event.target.value })}
+                  placeholder="允许域名，用英文逗号分隔"
+                />
+                <button type="submit">保存平台</button>
+              </form>
+              {selectedPlatform && (
+                <button className="danger" type="button" onClick={() => onDeletePlatform(selectedPlatform)}>
+                  移除当前平台
+                </button>
+              )}
+              {selectedAccount && (
+                <div className="danger-zone">
+                  <button type="button" onClick={() => onResetAccountProfile(selectedAccount.id)}>
+                    重建当前账号浏览器数据
+                  </button>
+                  <button className="danger" type="button" onClick={() => onDeleteAccount(selectedAccount.id)}>
+                    移除当前账号记录
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-          <form className="stacked-form" onSubmit={handleCreatePlatform}>
-            <h2>添加平台</h2>
-            <input required value={platformForm.name} onChange={(event) => setPlatformForm({ ...platformForm, name: event.target.value })} placeholder="平台名称" />
-            <input required value={platformForm.baseUrl} onChange={(event) => setPlatformForm({ ...platformForm, baseUrl: event.target.value })} placeholder="首页 URL" />
-            <input required value={platformForm.loginUrl} onChange={(event) => setPlatformForm({ ...platformForm, loginUrl: event.target.value })} placeholder="登录页 URL" />
-            <input required value={platformForm.allowedOrigins} onChange={(event) => setPlatformForm({ ...platformForm, allowedOrigins: event.target.value })} placeholder="允许域名，用英文逗号分隔" />
-            <button type="submit">保存平台</button>
-          </form>
         </details>
       </aside>
 
-      <section className="account-pane">
-        <div className="pane-title">
-          <span>{selectedPlatform ? selectedPlatform.name : "全部账号"}</span>
-          <span>{visibleAccounts.length} 个账号</span>
-        </div>
-        <div className="bulk-toolbar">
-          <strong>当前批次 {visibleAccounts.length > 0 ? `${bulkStartIndex}-${bulkRangeEnd}` : "0-0"}</strong>
+      <section className="account-pane operator-main">
+        <section className="bulk-toolbar operator-command">
+          <div className="command-copy">
+            <span className="eyebrow">当前批次</span>
+            <strong>{visibleAccounts.length > 0 ? `${bulkStartIndex}-${bulkRangeEnd}` : "0-0"}</strong>
+          </div>
           <label className="compact-field">
             <span>起始序号</span>
             <input
@@ -713,7 +1065,7 @@ export function App() {
               max={Math.max(1, visibleAccounts.length)}
               type="number"
               value={bulkStartIndex}
-              onChange={(event) => handleSelectBulkStart(Number(event.target.value))}
+              onChange={(event) => onBulkStartChange(Number(event.target.value))}
             />
           </label>
           <label className="compact-field">
@@ -723,164 +1075,173 @@ export function App() {
               max={MAX_BULK_LAUNCH_ACCOUNTS}
               type="number"
               value={bulkCount}
-              onChange={(event) => handleSelectBulkCount(Number(event.target.value))}
+              onChange={(event) => onBulkCountChange(Number(event.target.value))}
             />
           </label>
-          <button type="button" onClick={selectCurrentBulkRange} disabled={visibleAccounts.length === 0}>
+          <button type="button" onClick={onSelectCurrentBulkRange} disabled={visibleAccounts.length === 0}>
             选择当前批
           </button>
-          <button type="button" onClick={selectNextBulkRange} disabled={visibleAccounts.length === 0}>
+          <button type="button" onClick={onSelectNextBulkRange} disabled={visibleAccounts.length === 0}>
             下一批
           </button>
-          <span className="bulk-range-note">已选择 {selectedBulkAccountIds.length}/{MAX_BULK_LAUNCH_ACCOUNTS}</span>
-          <button type="button" onClick={() => setSelectedBulkAccountIds([])} disabled={selectedBulkAccountIds.length === 0}>
+          <button type="button" onClick={() => onSetSelectedBulkAccountIds([])} disabled={selectedBulkAccountIds.length === 0}>
             清空
           </button>
           <button
-            className="primary-action"
+            className="primary-action command-primary"
             type="button"
-            onClick={() => void handleBulkLaunch()}
+            onClick={onBulkLaunch}
             disabled={selectedBulkAccountIds.length === 0}
           >
-            批量上号
+            开始当前批次
           </button>
-        </div>
-        <div className="table">
-          <div className="table-row table-head account-grid">
-            <span>选择</span>
-            <span>序号</span>
-            <span>操作</span>
-            <span>邮箱</span>
-            <span>密码</span>
-            <span>验证密钥</span>
-            <span>地区/年份</span>
-            <span>当前步骤</span>
-          </div>
-          {visibleAccounts.map((account, index) => (
-            <div
-              key={account.id}
-              className={account.id === selectedAccountId ? "table-row account-grid selected" : "table-row account-grid"}
-              onClick={() => setSelectedAccountId(account.id)}
-            >
-              <span>
-                <input
-                  className="row-check"
-                  type="checkbox"
-                  aria-label={`选择第 ${index + 1} 个账号`}
-                  checked={selectedBulkAccountIds.includes(account.id)}
-                  disabled={!selectedBulkAccountIds.includes(account.id) && selectedBulkAccountIds.length >= MAX_BULK_LAUNCH_ACCOUNTS}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={() => toggleBulkSelection(account.id)}
-                />
-              </span>
-              <span className="row-index">{index + 1}</span>
-              <span className="row-actions">
-                <button className="primary-action" onClick={(event) => { event.stopPropagation(); void handleLaunch(account.id); }}>上号</button>
-                <button onClick={(event) => { event.stopPropagation(); void handleOpenSession(account.id); }}>会话</button>
-                <button className="danger" onClick={(event) => { event.stopPropagation(); void handleDeleteAccount(account.id); }}>删</button>
-              </span>
-              <span className="secret-cell">{accountDetails[account.id]?.username ?? account.usernamePreview}</span>
-              <span className="secret-cell">{accountDetails[account.id]?.password ?? "读取中"}</span>
-              <span className="secret-cell">{accountDetails[account.id]?.secretMeta.verificationSecret ?? "-"}</span>
-              <span>{[accountDetails[account.id]?.secretMeta.region, accountDetails[account.id]?.secretMeta.year].filter(Boolean).join(" / ") || "-"}</span>
-              <span className={accountFeedback[account.id] ? `inline-status ${accountFeedback[account.id].level}` : undefined}>
-                {accountFeedback[account.id]?.message ?? account.status}
-              </span>
-            </div>
-          ))}
-          {visibleAccounts.length === 0 && <div className="empty-state">暂无账号。先添加平台、适配器和账号。</div>}
-        </div>
+        </section>
 
-        <section className="run-panel">
-          <div className="pane-title">
-            <span>步骤反馈</span>
-            <span>{selectedBulkAccounts.length}</span>
-          </div>
-          {selectedBulkAccounts.length === 0 ? (
-            <p className="hint">选择账号后，这里显示每个账号卡在哪一步。</p>
-          ) : (
-            <div className="run-list">
-              {selectedBulkAccounts.map((account) => (
-                <div key={account.id} className="run-card">
-                  <strong>{getAccountLabel(account)}</strong>
+        <div className="operator-work-area">
+          <section className="task-list-panel">
+            <div className="pane-title">
+              <span>任务列表</span>
+              <span>{visibleAccounts.length} 个账号</span>
+            </div>
+            <div className="table operator-table">
+              <div className="table-row table-head account-grid">
+                <span>选择</span>
+                <span>序号</span>
+                <span>账号</span>
+                <span>2FA 密钥</span>
+                <span>地区/年份</span>
+                <span>状态</span>
+                <span>操作</span>
+              </div>
+              {visibleAccounts.map((account, index) => (
+                <div
+                  key={account.id}
+                  className={account.id === selectedAccountId ? "table-row account-grid selected" : "table-row account-grid"}
+                  onClick={() => onSelectAccount(account.id)}
+                >
+                  <span>
+                    <input
+                      className="row-check"
+                      type="checkbox"
+                      aria-label={`选择第 ${index + 1} 个账号`}
+                      checked={selectedBulkAccountIds.includes(account.id)}
+                      disabled={
+                        !selectedBulkAccountIds.includes(account.id) &&
+                        selectedBulkAccountIds.length >= MAX_BULK_LAUNCH_ACCOUNTS
+                      }
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={() => onSelectBulkAccount(account.id)}
+                    />
+                  </span>
+                  <span className="row-index">{index + 1}</span>
+                  <span className="secret-cell">{accountDetails[account.id]?.username ?? account.usernamePreview}</span>
+                  <span className="secret-cell">
+                    {accountDetails[account.id]?.secretMeta.verificationSecret ?? "未配置"}
+                  </span>
+                  <span>
+                    {[accountDetails[account.id]?.secretMeta.region, accountDetails[account.id]?.secretMeta.year]
+                      .filter(Boolean)
+                      .join(" / ") || "-"}
+                  </span>
                   <span className={accountFeedback[account.id] ? `inline-status ${accountFeedback[account.id].level}` : "inline-status"}>
-                    {accountFeedback[account.id]?.message ?? "等待开始"}
+                    {accountFeedback[account.id]?.message ?? account.status}
+                  </span>
+                  <span className="row-actions">
+                    <button
+                      className="primary-action"
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onLaunch(account.id);
+                      }}
+                    >
+                      上号
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenSession(account.id);
+                      }}
+                    >
+                      会话
+                    </button>
                   </span>
                 </div>
               ))}
+              {visibleAccounts.length === 0 && <div className="empty-state">暂无账号。请先导入账号文件，或在管理员维护里补录单个账号。</div>}
             </div>
-          )}
-        </section>
-
-        <section className="account-detail-panel">
-          <h2>当前账号</h2>
-          {selectedAccount ? (
-            <div className="detail-box">
-              <strong>{getAccountLabel(selectedAccount)}</strong>
-              <span>邮箱: {selectedAccountDetail?.username ?? selectedAccount.usernamePreview}</span>
-              <span>密码: {selectedAccountDetail?.password ?? "读取中"}</span>
-              <span>验证密钥: {selectedAccountDetail?.secretMeta.verificationSecret ?? "-"}</span>
-              <span>短码: {selectedAccountDetail?.secretMeta.extraCode ?? "-"}</span>
-              <span>地区/年份: {[selectedAccountDetail?.secretMeta.region, selectedAccountDetail?.secretMeta.year].filter(Boolean).join(" / ") || "-"}</span>
-              <span>标签: {selectedAccount.tags.join(", ") || "-"}</span>
-              <span>Profile: {selectedAccount.profileId.slice(0, 8)}</span>
-              <span>状态: {accountFeedback[selectedAccount.id]?.message ?? selectedAccount.status}</span>
-              <button type="button" onClick={() => void handleResetAccountProfile(selectedAccount.id)}>用模板重置 Profile</button>
-              <button className="danger" type="button" onClick={() => void handleDeleteAccount(selectedAccount.id)}>删除记录</button>
-            </div>
-          ) : (
-            <p className="hint">选择一个账号查看详情，或在下方添加新账号。</p>
-          )}
-        </section>
-
-        <details className="advanced-panel">
-          <summary>高级配置</summary>
-          <form className="stacked-form" onSubmit={handleSaveAdapter}>
-            <h2>登录适配器</h2>
-            <select disabled={!selectedPlatformId} value={adapterForm.authMode} onChange={(event) => setAdapterForm({ ...adapterForm, authMode: event.target.value as LoginAuthMode })}>
-              <option value="password">账号密码自动填充</option>
-              <option value="manual_session">手动登录 / OAuth 会话复用</option>
-              <option value="flow_password">多步骤密码登录</option>
-            </select>
-            <input disabled={!selectedPlatformId || isManualSessionAdapter || isFlowPasswordAdapter} value={adapterForm.usernameLocator} onChange={(event) => setAdapterForm({ ...adapterForm, usernameLocator: event.target.value })} placeholder="账号字段 selector" />
-            <input disabled={!selectedPlatformId || isManualSessionAdapter || isFlowPasswordAdapter} value={adapterForm.passwordLocator} onChange={(event) => setAdapterForm({ ...adapterForm, passwordLocator: event.target.value })} placeholder="密码字段 selector" />
-            <input disabled={!selectedPlatformId || isManualSessionAdapter || isFlowPasswordAdapter} value={adapterForm.submitLocator} onChange={(event) => setAdapterForm({ ...adapterForm, submitLocator: event.target.value })} placeholder="登录按钮 selector" />
-            <input disabled={!selectedPlatformId || !isManualSessionAdapter} value={adapterForm.startLocator} onChange={(event) => setAdapterForm({ ...adapterForm, startLocator: event.target.value })} placeholder="可选：登录入口 selector" />
-            <textarea disabled={!selectedPlatformId || !isFlowPasswordAdapter} value={adapterForm.flowSteps} onChange={(event) => setAdapterForm({ ...adapterForm, flowSteps: event.target.value })} placeholder={"多步骤流程，每行：类型|selector\nclick|button:has-text('Google')\nfill_username|input[type='email']\nfill_password|input[type='password']"} />
-            <input disabled={!selectedPlatformId} value={adapterForm.successSelector} onChange={(event) => setAdapterForm({ ...adapterForm, successSelector: event.target.value })} placeholder="成功 selector" />
-            <input disabled={!selectedPlatformId} value={adapterForm.failureSelector} onChange={(event) => setAdapterForm({ ...adapterForm, failureSelector: event.target.value })} placeholder="失败 selector" />
-            <input disabled={!selectedPlatformId} value={adapterForm.manualSelector} onChange={(event) => setAdapterForm({ ...adapterForm, manualSelector: event.target.value })} placeholder="验证码/2FA selector" />
-            {isManualSessionAdapter && <p className="hint">此模式用普通 Chrome 打开独立 Profile，不自动填写 Google 密码。首次登录后复用该 Profile。</p>}
-            {isFlowPasswordAdapter && <p className="hint">此模式会自动填入账号密码。包含 Google 登录域名的平台会用普通 Chrome 填表，后续验证由你手动完成。</p>}
-            <button disabled={!selectedPlatformId} type="submit">保存适配器</button>
-          </form>
-
-          <form className="stacked-form" onSubmit={handleCreateAccount}>
-            <h2>添加账号</h2>
-            <input disabled={!selectedPlatformId} required value={accountForm.displayName} onChange={(event) => setAccountForm({ ...accountForm, displayName: event.target.value })} placeholder="显示名称" />
-            <input disabled={!selectedPlatformId} required value={accountForm.username} onChange={(event) => setAccountForm({ ...accountForm, username: event.target.value })} placeholder="账号/邮箱" />
-            <input disabled={!selectedPlatformId} required={isFlowPasswordAdapter || !isManualSessionAdapter} type="password" value={accountForm.password} onChange={(event) => setAccountForm({ ...accountForm, password: event.target.value })} placeholder="密码，手动会话可留空" />
-            <input disabled={!selectedPlatformId} value={accountForm.verificationSecret} onChange={(event) => setAccountForm({ ...accountForm, verificationSecret: event.target.value })} placeholder="验证密钥 / 2FA Secret" />
-            <input disabled={!selectedPlatformId} value={accountForm.extraCode} onChange={(event) => setAccountForm({ ...accountForm, extraCode: event.target.value })} placeholder="短码 / 附加字段" />
-            <input disabled={!selectedPlatformId} value={accountForm.region} onChange={(event) => setAccountForm({ ...accountForm, region: event.target.value })} placeholder="地区" />
-            <input disabled={!selectedPlatformId} value={accountForm.year} onChange={(event) => setAccountForm({ ...accountForm, year: event.target.value })} placeholder="年份" />
-            <input disabled={!selectedPlatformId} value={accountForm.tags} onChange={(event) => setAccountForm({ ...accountForm, tags: event.target.value })} placeholder="标签，用英文逗号分隔" />
-            <button disabled={!selectedPlatformId} type="submit">保存账号</button>
-          </form>
-        </details>
-      </section>
-
-      <section className="log-pane">
-        <div className="pane-title">
-          <span>运行日志</span>
-          <span>{logs.length}</span>
+          </section>
         </div>
-        {logs.length === 0 ? <span className="hint">暂无运行日志。</span> : logs.map((log) => (
-          <div key={log.id} className={`log-line ${log.level}`}>
-            <time>{log.at}</time>
-            <span>{log.message}</span>
+
+        <section className="feedback-dock">
+          <div className="feedback-column feedback-runs">
+            <section className="operator-card run-panel">
+              <div className="pane-title">
+                <span>步骤反馈</span>
+                <span>{selectedBulkAccounts.length}</span>
+              </div>
+              {selectedBulkAccounts.length === 0 ? (
+                <p className="hint">选择账号后，这里显示每个账号卡在哪一步。</p>
+              ) : (
+                <div className="run-list">
+                  {selectedBulkAccounts.map((account) => (
+                    <div key={account.id} className="run-card">
+                      <strong>{getVisibleAccountLabel(account)}</strong>
+                      <span className={accountFeedback[account.id] ? `inline-status ${accountFeedback[account.id].level}` : "inline-status"}>
+                        {accountFeedback[account.id]?.message ?? "等待开始"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
-        ))}
+
+          <div className="feedback-account-detail feedback-column">
+            <section className="operator-card account-detail-panel">
+              <div className="pane-title">
+                <span>当前账号</span>
+                <span>{selectedAccount ? getVisibleAccountLabel(selectedAccount) : "未选择"}</span>
+              </div>
+              {selectedAccount ? (
+                <div className="detail-box">
+                  <span>账号: {selectedAccountDetail?.username ?? selectedAccount.usernamePreview}</span>
+                  <span>2FA 密钥: {selectedAccountDetail?.secretMeta.verificationSecret ?? "未配置"}</span>
+                  <span>地区/年份: {[selectedAccountDetail?.secretMeta.region, selectedAccountDetail?.secretMeta.year].filter(Boolean).join(" / ") || "-"}</span>
+                  <span>短码: {selectedAccountDetail?.secretMeta.extraCode ?? "-"}</span>
+                  <span>标签: {selectedAccount.tags.join(", ") || "-"}</span>
+                  <span>状态: {accountFeedback[selectedAccount.id]?.message ?? selectedAccount.status}</span>
+                  <details className="secret-detail">
+                    <summary>查看登录信息</summary>
+                    <span>登录密码: {selectedAccountDetail?.password ?? "读取中"}</span>
+                  </details>
+                </div>
+              ) : (
+                <p className="hint">点击任务列表中的账号后，这里显示该账号的登录辅助信息。</p>
+              )}
+            </section>
+          </div>
+
+          <div className="feedback-column feedback-recent-logs">
+            <section className="operator-card recent-log-panel">
+              <div className="pane-title">
+                <span>最近反馈</span>
+                <span>{logs.length}</span>
+              </div>
+              {recentLogs.length === 0 ? (
+                <p className="hint">暂无运行反馈。</p>
+              ) : (
+                recentLogs.map((log) => (
+                  <div key={log.id} className={`log-line ${log.level}`}>
+                    <time>{log.at}</time>
+                    <span>{log.message}</span>
+                  </div>
+                ))
+              )}
+            </section>
+          </div>
+        </section>
       </section>
     </main>
   );

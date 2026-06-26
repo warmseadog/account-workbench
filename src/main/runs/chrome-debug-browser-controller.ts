@@ -2,14 +2,11 @@ import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { PlaywrightBrowserSession, type BrowserController, type BrowserSession } from "./login-runner.js";
-
-interface ChromeCommand {
-  executable: string;
-  args: string[];
-}
+import { createChromeExtensionArgs } from "./chrome-launch-options.js";
+import { createChromeLaunchCommands, type ChromeCommand } from "./chrome-executable.js";
 
 export class ChromeDebugBrowserController implements BrowserController {
-  constructor(private readonly options: { executablePath?: string } = {}) {}
+  constructor(private readonly options: { executablePath?: string; extensionPaths?: string[] } = {}) {}
 
   async openPersistentSession(profilePath: string): Promise<BrowserSession> {
     mkdirSync(profilePath, { recursive: true });
@@ -32,29 +29,12 @@ export class ChromeDebugBrowserController implements BrowserController {
       "--remote-debugging-address=127.0.0.1",
       "--remote-allow-origins=*",
       "--no-first-run",
+      ...createChromeExtensionArgs(this.options.extensionPaths),
       "--new-window",
       "about:blank"
     ];
 
-    if (this.options.executablePath) {
-      return [{ executable: this.options.executablePath, args }];
-    }
-
-    if (process.platform === "darwin") {
-      return [{ executable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", args }];
-    }
-
-    if (process.platform === "win32") {
-      return [
-        { executable: "chrome.exe", args },
-        { executable: "Google Chrome", args }
-      ];
-    }
-
-    return ["google-chrome-stable", "google-chrome", "chromium-browser", "chromium"].map((executable) => ({
-      executable,
-      args
-    }));
+    return createChromeLaunchCommands(args, { executablePath: this.options.executablePath });
   }
 
   private async launchChrome(profilePath: string, port: number): Promise<void> {

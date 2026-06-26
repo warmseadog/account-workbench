@@ -10,6 +10,12 @@ class RecordingManualBrowserOpener implements ManualBrowserOpener {
   }
 }
 
+class ThrowingManualBrowserOpener implements ManualBrowserOpener {
+  async openProfile(): Promise<void> {
+    throw new Error("chrome not found");
+  }
+}
+
 function platform(): Platform {
   return {
     id: "platform-1",
@@ -43,5 +49,19 @@ describe("ManualSessionRunner", () => {
     expect(run.status).toBe("manual_handoff");
     expect(run.requiresManual).toBe(true);
     expect(run.steps.map((step) => step.message).join("\n")).toContain("普通 Chrome");
+  });
+
+  it("explains Chrome startup failures without implying a window was already open", async () => {
+    const runner = new ManualSessionRunner(new ThrowingManualBrowserOpener());
+
+    const run = await runner.run({
+      accountId: "account-1",
+      profilePath: "/tmp/account-workbench/profile-1",
+      platform: platform()
+    });
+
+    expect(run.status).toBe("failed");
+    expect(run.errorCode).toBe("browser_profile_unavailable");
+    expect(run.steps.at(-1)?.message).toContain("未检测到或无法启动 Google Chrome");
   });
 });

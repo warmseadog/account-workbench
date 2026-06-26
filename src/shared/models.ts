@@ -65,6 +65,7 @@ export interface Account {
 export interface AccountSecrets {
   username: string;
   password?: string;
+  verificationSecret?: string;
 }
 
 export interface AccountSecretMetadata {

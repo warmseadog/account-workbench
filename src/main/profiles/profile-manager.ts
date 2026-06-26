@@ -6,7 +6,8 @@ const DEFAULT_CAMERA_ORIGINS = ["https://accounts.google.com", "https://www.goog
 export class ProfileManager {
   constructor(
     private readonly profilesRoot: string,
-    private readonly profileTemplatePath?: string
+    private readonly profileTemplatePath?: string,
+    private readonly bundledProfileTemplatePath?: string
   ) {}
 
   getProfilePath(platformId: string, accountId: string): string {
@@ -19,6 +20,7 @@ export class ProfileManager {
   }
 
   ensureProfilePath(platformId: string, accountId: string, cameraOrigins: string[] = []): string {
+    this.seedProfileTemplate();
     const profilePath = this.getProfilePath(platformId, accountId);
     this.ensureInitializedProfile(profilePath);
     this.resetProfileIfTemplateExtensionsAreMissing(profilePath);
@@ -27,10 +29,26 @@ export class ProfileManager {
   }
 
   resetProfilePath(platformId: string, accountId: string, cameraOrigins: string[] = []): string {
+    this.seedProfileTemplate();
     const profilePath = this.getProfilePath(platformId, accountId);
     this.copyTemplateToProfile(profilePath);
     this.grantCameraAccess(profilePath, cameraOrigins);
     return profilePath;
+  }
+
+  private seedProfileTemplate(): void {
+    if (
+      !this.profileTemplatePath ||
+      !this.bundledProfileTemplatePath ||
+      !this.isNonEmptyDirectory(this.bundledProfileTemplatePath) ||
+      this.isNonEmptyDirectory(this.profileTemplatePath)
+    ) {
+      return;
+    }
+
+    mkdirSync(path.dirname(this.profileTemplatePath), { recursive: true });
+    cpSync(this.bundledProfileTemplatePath, this.profileTemplatePath, { recursive: true });
+    this.removeVolatileBrowserState(this.profileTemplatePath);
   }
 
   private ensureInitializedProfile(profilePath: string): void {

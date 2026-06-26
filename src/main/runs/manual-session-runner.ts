@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { spawn } from "node:child_process";
 import type { LoginRun, Platform } from "../../shared/models.js";
+import { createChromeExtensionArgs } from "./chrome-launch-options.js";
+import { createChromeLaunchCommands } from "./chrome-executable.js";
 
 export interface ManualBrowserOpenRequest {
   profilePath: string;
@@ -35,7 +37,10 @@ export class ManualSessionRunner {
         url: input.platform.loginUrl || input.platform.homeUrl || input.platform.baseUrl
       });
     } catch {
-      step("failed", "无法打开普通 Chrome 独立 Profile；请确认本机已安装 Google Chrome，并关闭同一账号的已打开窗口后重试。");
+      step(
+        "failed",
+        "未检测到或无法启动 Google Chrome，或该账号独立 Profile 被占用；请确认已安装 Google Chrome，关闭残留 Chrome 进程后重试。"
+      );
       run.errorCode = "browser_profile_unavailable";
       run.endedAt = new Date().toISOString();
       return run;
@@ -63,6 +68,8 @@ export class ManualSessionRunner {
 }
 
 export class SystemChromeProfileOpener implements ManualBrowserOpener {
+  constructor(private readonly options: { extensionPaths?: string[] } = {}) {}
+
   async openProfile(request: ManualBrowserOpenRequest): Promise<void> {
     mkdirSync(request.profilePath, { recursive: true });
     const launchCommands = this.createLaunchCommands(request);
@@ -81,20 +88,15 @@ export class SystemChromeProfileOpener implements ManualBrowserOpener {
   }
 
   private createLaunchCommands(request: ManualBrowserOpenRequest): Array<{ executable: string; args: string[] }> {
-    const chromeArgs = [`--user-data-dir=${request.profilePath}`, "--no-first-run", "--new-window", request.url];
+    const chromeArgs = [
+      `--user-data-dir=${request.profilePath}`,
+      "--no-first-run",
+      ...createChromeExtensionArgs(this.options.extensionPaths),
+      "--new-window",
+      request.url
+    ];
 
-    if (process.platform === "darwin") {
-      return [{ executable: "open", args: ["-na", "Google Chrome", "--args", ...chromeArgs] }];
-    }
-
-    if (process.platform === "win32") {
-      return [{ executable: "cmd.exe", args: ["/c", "start", "", "chrome", ...chromeArgs] }];
-    }
-
-    return ["google-chrome-stable", "google-chrome", "chromium-browser", "chromium"].map((executable) => ({
-      executable,
-      args: chromeArgs
-    }));
+    return createChromeLaunchCommands(chromeArgs);
   }
 
   private spawnDetached(executable: string, args: string[]): Promise<void> {

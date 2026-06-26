@@ -9,6 +9,7 @@ import { CryptoVault } from "./crypto/vault.js";
 import { ProfileManager } from "./profiles/profile-manager.js";
 import { SqliteStore } from "./storage/sqlite-store.js";
 import { createAppRuntimeConfig, getDevMasterPassword } from "./app-runtime.js";
+import { getBundledChromeExtensionPaths, getBundledProfileTemplatePath } from "./runtime-resources.js";
 import {
   WorkbenchService,
   type CreateAccountInput,
@@ -22,7 +23,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let service: WorkbenchService | undefined;
-const systemChromeOpener = new SystemChromeProfileOpener();
 
 function requireService(): WorkbenchService {
   if (!service) {
@@ -35,12 +35,22 @@ function createService(masterPassword: string): WorkbenchService {
   const userData = app.getPath("userData");
   const store = new SqliteStore(path.join(userData, "account-workbench.sqlite"));
   const vault = CryptoVault.fromMasterPassword(masterPassword);
-  const profiles = new ProfileManager(path.join(userData, "profiles"), getProfileTemplatePath());
-  return new WorkbenchService(store, vault, profiles);
+  const profiles = new ProfileManager(
+    path.join(userData, "profiles"),
+    getProfileTemplatePath(),
+    getBundledProfileTemplatePath()
+  );
+  const nextService = new WorkbenchService(store, vault, profiles);
+  nextService.ensureDefaultDolaGooglePreset();
+  return nextService;
 }
 
 function getProfileTemplatePath(): string {
   return path.join(app.getPath("userData"), "profile-template", "user-data");
+}
+
+function createSystemChromeOpener(): SystemChromeProfileOpener {
+  return new SystemChromeProfileOpener({ extensionPaths: getBundledChromeExtensionPaths() });
 }
 
 async function createWindow(): Promise<void> {
@@ -78,7 +88,7 @@ ipcMain.handle("platforms:delete", (_event, platformId: string) => {
   return { deleted: true };
 });
 ipcMain.handle("platforms:create-dola-preset", () => requireService().createDolaPreset());
-ipcMain.handle("platforms:create-dola-google-password-preset", () => requireService().createDolaGooglePasswordPreset());
+ipcMain.handle("platforms:create-dola-google-password-preset", () => requireService().ensureDefaultDolaGooglePreset());
 ipcMain.handle("files:pick-account-file", async () => {
   const result = await dialog.showOpenDialog({
     properties: ["openFile"],
@@ -92,7 +102,7 @@ ipcMain.handle("files:pick-account-file", async () => {
 });
 ipcMain.handle("profiles:open-template", async () => {
   const profilePath = getProfileTemplatePath();
-  await systemChromeOpener.openProfile({
+  await createSystemChromeOpener().openProfile({
     profilePath,
     url: "chrome://extensions/"
   });
@@ -127,11 +137,12 @@ ipcMain.handle("adapters:save", (_event, input: SaveLoginAdapterInput) => requir
 ipcMain.handle("adapters:get", (_event, platformId: string) => requireService().getLoginAdapter(platformId));
 ipcMain.handle("runs:launch", async (_event, accountId: string) => {
   const active = requireService();
+  const extensionPaths = getBundledChromeExtensionPaths();
   const launcher = new AccountLoginLauncher({
     service: active,
-    browserControllerFactory: () => new PlaywrightBrowserController({ channel: "chrome" }),
-    normalChromeBrowserControllerFactory: () => new ChromeDebugBrowserController(),
-    manualSessionRunner: new ManualSessionRunner(systemChromeOpener)
+    browserControllerFactory: () => new PlaywrightBrowserController({ channel: "chrome", extensionPaths }),
+    normalChromeBrowserControllerFactory: () => new ChromeDebugBrowserController({ extensionPaths }),
+    manualSessionRunner: new ManualSessionRunner(createSystemChromeOpener())
   });
   return launcher.launch(accountId);
 });
@@ -140,7 +151,7 @@ ipcMain.handle("runs:open-session", async (_event, accountId: string) => {
   const active = requireService();
   const account = active.getAccount(accountId);
   const platform = active.getPlatform(account.platformId);
-  await systemChromeOpener.openProfile({
+  await createSystemChromeOpener().openProfile({
     profilePath: active.getProfilePath(accountId),
     url: platform.homeUrl ?? platform.baseUrl
   });

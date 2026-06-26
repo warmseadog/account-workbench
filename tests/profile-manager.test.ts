@@ -34,6 +34,19 @@ describe("ProfileManager", () => {
     expect(readFileSync(path.join(profilePath, "Default", "Extensions", "extension-a", "manifest.json"), "utf8")).toBe("{}");
   });
 
+  it("seeds the user template from a bundled template before creating account profiles", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "account-workbench-bundled-template-"));
+    const userTemplatePath = path.join(dir, "user-data-template", "user-data");
+    const bundledTemplatePath = path.join(dir, "resources", "profile-template", "user-data");
+    const manager = new ProfileManager(path.join(dir, "profiles"), userTemplatePath, bundledTemplatePath);
+    writeNestedFile(path.join(bundledTemplatePath, "Default", "Extensions", "extension-a", "1.0.0_0", "manifest.json"), "{}");
+
+    const profilePath = manager.ensureProfilePath("platform-a", "account-one");
+
+    expect(existsSync(path.join(userTemplatePath, "Default", "Extensions", "extension-a", "1.0.0_0", "manifest.json"))).toBe(true);
+    expect(existsSync(path.join(profilePath, "Default", "Extensions", "extension-a", "1.0.0_0", "manifest.json"))).toBe(true);
+  });
+
   it("does not overwrite an existing account profile with the template", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "account-workbench-profiles-"));
     const templatePath = path.join(dir, "profile-template", "user-data");

@@ -10,15 +10,52 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "build:main": "tsc -p tsconfig.node.json",
     "build:renderer": "vite build",
-    "build": "npm run build:main && npm run build:renderer"
+    "build": "npm run build:main && npm run build:renderer",
+    "build:win": "npm run build && npx electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "com.account-workbench.desktop",
+    "productName": "账号工作台",
+    "directories": {
+      "output": "dist/installers"
+    },
+    "files": [
+      "dist/main/**/*",
+      "dist/renderer/**/*",
+      "package.json",
+      "!node_modules/fsevents/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "."
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Account-Workbench-${version}-windows-installer-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    }
   },
   "dependencies": {
-    "electron": "^39.2.7",
     "playwright": "^1.57.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
+    "electron": "^39.2.7",
     "@vitejs/plugin-react": "^5.1.1",
     "@types/node": "^24.10.2",
     "@types/react": "^19.2.7",
