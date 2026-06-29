@@ -483,7 +483,7 @@ export function App() {
 
   async function executeLaunch(accountId: string, accountLabel: string) {
     if (!bridge) return;
-    setAccountRunFeedback(accountId, { level: "info", message: "正在打开浏览器" });
+    setAccountRunFeedback(accountId, { level: "info", message: "正在打开 Profile" });
     addLog("info", `${accountLabel}：开始上号，正在打开独立浏览器 Profile。`);
     try {
       const run = (await bridge.launchLogin(accountId)) as LoginRun;
@@ -516,9 +516,15 @@ export function App() {
 
     const accountsToLaunch = selectedBulkAccounts.slice(0, MAX_BULK_LAUNCH_ACCOUNTS);
     const startedAt = Date.now();
+    accountsToLaunch.forEach((account, index) => {
+      setAccountRunFeedback(account.id, {
+        level: "info",
+        message: index < BULK_LAUNCH_CONCURRENCY ? "准备打开" : "排队中"
+      });
+    });
     addLog(
       "info",
-      `批量上号开始：第 ${bulkStartIndex}-${bulkRangeEnd} 个账号，最多并发 ${BULK_LAUNCH_CONCURRENCY} 个，错峰 ${BULK_LAUNCH_STAGGER_MS}ms。`
+      `批量上号开始：本批最多 ${MAX_BULK_LAUNCH_ACCOUNTS} 个账号，前 ${BULK_LAUNCH_CONCURRENCY} 个先启动，后续排队；每个 Profile 间隔 ${(BULK_LAUNCH_STAGGER_MS / 1000).toFixed(1)} 秒打开。`
     );
     try {
       await runBulkLaunchQueue(accountsToLaunch, async (account) => {
@@ -1115,6 +1121,7 @@ export function OperatorWorkbenchView({
                 <span>选择</span>
                 <span>序号</span>
                 <span>账号</span>
+                <span>密码</span>
                 <span>2FA 密钥</span>
                 <span>地区/年份</span>
                 <span>状态</span>
@@ -1142,6 +1149,9 @@ export function OperatorWorkbenchView({
                   </span>
                   <span className="row-index">{index + 1}</span>
                   <span className="secret-cell">{accountDetails[account.id]?.username ?? account.usernamePreview}</span>
+                  <span className="secret-cell">
+                    {accountDetails[account.id]?.password ?? (account.hasPassword ? "读取中" : "未配置")}
+                  </span>
                   <span className="secret-cell">
                     {accountDetails[account.id]?.secretMeta.verificationSecret ?? "未配置"}
                   </span>

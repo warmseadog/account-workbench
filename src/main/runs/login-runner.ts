@@ -110,18 +110,6 @@ export class LoginRunner {
       );
     }
 
-    if (context.credentials.verificationSecret && session.openTotpHelper) {
-      try {
-        await session.openTotpHelper({
-          url: TOTP_HELPER_URL,
-          secret: context.credentials.verificationSecret
-        });
-        step("opening_browser", "已打开 2FA.CN 并提交该账号 2FA 密钥。");
-      } catch {
-        step("opening_browser", "2FA.CN 自动提交失败；请在账号详情中复制 2FA 密钥后手动生成验证码。");
-      }
-    }
-
     const currentUrl = await session.currentUrl();
 
     if (this.isStartupUrl(currentUrl)) {
@@ -137,6 +125,18 @@ export class LoginRunner {
     const loginUrl = await session.currentUrl();
     if (!originRules.isAllowedUrl(loginUrl)) {
       return fail("origin_not_allowed", "Login page URL is outside the configured platform origins.");
+    }
+
+    if (context.credentials.verificationSecret && session.openTotpHelper) {
+      try {
+        await session.openTotpHelper({
+          url: TOTP_HELPER_URL,
+          secret: context.credentials.verificationSecret
+        });
+        step("opening_browser", "已打开 2FA.CN 并提交该账号 2FA 密钥。");
+      } catch {
+        step("opening_browser", "2FA.CN 自动提交失败；请在账号详情中复制 2FA 密钥后手动生成验证码。");
+      }
     }
 
     if (authMode === "manual_session") {

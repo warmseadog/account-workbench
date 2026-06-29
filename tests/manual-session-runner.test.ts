@@ -3,9 +3,9 @@ import { ManualSessionRunner, type ManualBrowserOpener } from "../src/main/runs/
 import type { Platform } from "../src/shared/models";
 
 class RecordingManualBrowserOpener implements ManualBrowserOpener {
-  requests: Array<{ profilePath: string; url: string }> = [];
+  requests: Array<{ profilePath: string; url?: string; urls?: string[] }> = [];
 
-  async openProfile(request: { profilePath: string; url: string }): Promise<void> {
+  async openProfile(request: { profilePath: string; url?: string; urls?: string[] }): Promise<void> {
     this.requests.push(request);
   }
 }
@@ -43,12 +43,36 @@ describe("ManualSessionRunner", () => {
     expect(opener.requests).toEqual([
       {
         profilePath: "/tmp/account-workbench/profile-1",
-        url: "https://www.dola.com/chat/?from_logout=1"
+        urls: ["https://www.dola.com/chat/?from_logout=1"]
       }
     ]);
     expect(run.status).toBe("manual_handoff");
     expect(run.requiresManual).toBe(true);
     expect(run.steps.map((step) => step.message).join("\n")).toContain("普通 Chrome");
+  });
+
+  it("opens 2FA.CN as the second helper page when the account has a verification secret", async () => {
+    const opener = new RecordingManualBrowserOpener();
+    const runner = new ManualSessionRunner(opener);
+
+    const run = await runner.run({
+      accountId: "account-1",
+      profilePath: "/tmp/account-workbench/profile-1",
+      platform: platform(),
+      credentials: {
+        username: "owner@gmail.com",
+        verificationSecret: "OTPSECRETVALUE"
+      }
+    } as Parameters<ManualSessionRunner["run"]>[0]);
+
+    expect(opener.requests).toEqual([
+      {
+        profilePath: "/tmp/account-workbench/profile-1",
+        urls: ["https://www.dola.com/chat/?from_logout=1", "https://2fa.cn/"]
+      }
+    ]);
+    expect(run.steps.map((step) => step.message)).toContain("已打开 2FA.CN 辅助页。");
+    expect(JSON.stringify(run.steps)).not.toContain("OTPSECRETVALUE");
   });
 
   it("records missing bundled extension status without blocking manual handoff", async () => {

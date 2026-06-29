@@ -480,8 +480,8 @@ h2 {
 }
 
 .account-grid {
-  grid-template-columns: 36px 42px minmax(180px, 1.1fr) minmax(190px, 1fr) minmax(104px, 0.55fr) minmax(132px, 0.7fr) 122px;
-  min-width: 960px;
+  grid-template-columns: 36px 42px minmax(180px, 1.05fr) minmax(140px, 0.78fr) minmax(190px, 1fr) minmax(104px, 0.55fr) minmax(132px, 0.7fr) 122px;
+  min-width: 1120px;
 }
 
 .account-grid > span:nth-child(1) {

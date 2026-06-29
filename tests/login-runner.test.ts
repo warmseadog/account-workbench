@@ -5,6 +5,7 @@ import type { LoginRunContext } from "../src/main/runs/login-runner";
 class FakeSession implements BrowserSession {
   filled: Array<{ locator: string; value: string }> = [];
   clicked: string[] = [];
+  events: string[] = [];
   focusedLocators: string[] = [];
   focusTimeouts: Array<number | undefined> = [];
   totpHelpers: Array<{ url: string; secret: string }> = [];
@@ -28,6 +29,7 @@ class FakeSession implements BrowserSession {
   }
 
   async goto(url: string): Promise<void> {
+    this.events.push(`goto:${url}`);
     this.current = url;
   }
 
@@ -73,6 +75,7 @@ class FakeSession implements BrowserSession {
   }
 
   async openTotpHelper(request: { url: string; secret: string }): Promise<void> {
+    this.events.push(`totp:${request.url}`);
     this.totpHelpers.push(request);
   }
 
@@ -263,6 +266,25 @@ describe("LoginRunner", () => {
     ]);
     expect(run.steps.map((step) => step.message)).toContain("已打开 2FA.CN 并提交该账号 2FA 密钥。");
     expect(JSON.stringify(run.steps)).not.toContain("OTPSECRETVALUE");
+  });
+
+  it("opens the target login page before submitting the 2FA.CN helper", async () => {
+    const browser = new FakeBrowserController("chrome://newtab/", "manual");
+    const runner = new LoginRunner(browser);
+    const input = context();
+    input.credentials = {
+      username: "owner@example.com",
+      password: "secret-password",
+      verificationSecret: "OTPSECRETVALUE"
+    };
+
+    const run = await runner.run(input);
+
+    expect(run.status).toBe("manual_handoff");
+    expect(browser.session.events.slice(0, 2)).toEqual([
+      "goto:https://example.com/login",
+      "totp:https://2fa.cn/"
+    ]);
   });
 
   it("redacts secrets from run steps", async () => {

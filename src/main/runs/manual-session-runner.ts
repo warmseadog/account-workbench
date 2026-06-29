@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { spawn } from "node:child_process";
-import type { BundledChromeExtensionStatus, LoginRun, Platform } from "../../shared/models.js";
+import type { AccountSecrets, BundledChromeExtensionStatus, LoginRun, Platform } from "../../shared/models.js";
 import { createChromeExtensionArgs } from "./chrome-launch-options.js";
 import { createChromeLaunchCommands } from "./chrome-executable.js";
 
 export interface ManualBrowserOpenRequest {
   profilePath: string;
-  url: string;
+  url?: string;
+  urls?: string[];
 }
 
 export interface ManualBrowserOpener {
@@ -18,7 +19,10 @@ export interface ManualSessionRunInput {
   accountId: string;
   profilePath: string;
   platform: Platform;
+  credentials?: Pick<AccountSecrets, "verificationSecret">;
 }
+
+const TOTP_HELPER_URL = "https://2fa.cn/";
 
 export class ManualSessionRunner {
   constructor(
@@ -40,10 +44,15 @@ export class ManualSessionRunner {
 
     step("opening_browser", "正在用普通 Chrome 打开该账号的独立 Profile。");
     try {
+      const loginUrl = input.platform.loginUrl || input.platform.homeUrl || input.platform.baseUrl;
+      const urls = input.credentials?.verificationSecret ? [loginUrl, TOTP_HELPER_URL] : [loginUrl];
       await this.opener.openProfile({
         profilePath: input.profilePath,
-        url: input.platform.loginUrl || input.platform.homeUrl || input.platform.baseUrl
+        urls
       });
+      if (input.credentials?.verificationSecret) {
+        step("opening_browser", "已打开 2FA.CN 辅助页。");
+      }
     } catch {
       step(
         "failed",
@@ -96,12 +105,13 @@ export class SystemChromeProfileOpener implements ManualBrowserOpener {
   }
 
   private createLaunchCommands(request: ManualBrowserOpenRequest): Array<{ executable: string; args: string[] }> {
+    const urls = request.urls ?? (request.url ? [request.url] : ["about:blank"]);
     const chromeArgs = [
       `--user-data-dir=${request.profilePath}`,
       "--no-first-run",
       ...createChromeExtensionArgs(this.options.extensionPaths),
       "--new-window",
-      request.url
+      ...urls
     ];
 
     return createChromeLaunchCommands(chromeArgs);

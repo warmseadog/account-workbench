@@ -1,5 +1,5 @@
-export const BULK_LAUNCH_CONCURRENCY = 2;
-export const BULK_LAUNCH_STAGGER_MS = 800;
+export const BULK_LAUNCH_CONCURRENCY = 5;
+export const BULK_LAUNCH_STAGGER_MS = 500;
 
 export interface BulkLaunchQueueOptions {
   concurrency?: number;
@@ -15,13 +15,28 @@ export async function runBulkLaunchQueue<T>(
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? BULK_LAUNCH_CONCURRENCY));
   const staggerMs = Math.max(0, Math.floor(options.staggerMs ?? BULK_LAUNCH_STAGGER_MS));
   const wait = options.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async (_, workerIndex) => {
-    for (let itemIndex = workerIndex; itemIndex < items.length; itemIndex += concurrency) {
-      if (itemIndex > 0 && staggerMs > 0) {
-        await wait(staggerMs);
-      }
+  let nextIndex = 0;
+  let launchCount = 0;
+  let launchGate = Promise.resolve();
 
-      await worker(items[itemIndex]);
+  const waitForLaunchTurn = async (): Promise<void> => {
+    const shouldWait = launchCount > 0 && staggerMs > 0;
+    launchCount += 1;
+    if (!shouldWait) {
+      return;
+    }
+
+    const turn = launchGate.then(() => wait(staggerMs));
+    launchGate = turn.catch(() => {});
+    await turn;
+  };
+
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex];
+      nextIndex += 1;
+      await waitForLaunchTurn();
+      await worker(item);
     }
   });
 

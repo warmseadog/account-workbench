@@ -181,10 +181,10 @@ describe("OperatorWorkbenchView", () => {
     expect(html).toContain("步骤反馈");
     expect(html).toContain("管理员维护");
     expect(html).toContain("账号");
+    expect(html).toContain("<span>密码</span>");
     expect(html).toContain("地区/年份");
     expect(html).toContain("状态");
 
-    expect(html).not.toContain("<span>密码</span>");
     expect(html).not.toContain("<span>验证密钥</span>");
     expect(html).not.toContain("删除平台");
     expect(html).not.toContain("用模板重置 Profile");
@@ -214,6 +214,16 @@ describe("OperatorWorkbenchView", () => {
     expect(html).toContain("otp-secret");
     expect(html).toContain("2FA 密钥: otp-secret");
     expect(html).not.toContain("验证信息: otp-secret");
+  });
+
+  it("shows the plaintext password immediately after the account column", () => {
+    const html = renderToStaticMarkup(<OperatorWorkbenchView {...createProps()} />);
+
+    const accountIndex = html.indexOf("operator@example.com");
+    const passwordIndex = html.indexOf("secret-password");
+
+    expect(accountIndex).toBeGreaterThan(-1);
+    expect(passwordIndex).toBeGreaterThan(accountIndex);
   });
 
   it("shows bundled extension status to operators", () => {

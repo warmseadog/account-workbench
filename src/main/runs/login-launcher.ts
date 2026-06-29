@@ -33,9 +33,10 @@ export class AccountLoginLauncher {
     }
 
     const profilePath = this.options.service.getProfilePath(accountId);
+    const credentials = this.options.service.getAccountSecrets(accountId);
     const launchMode = selectLoginLaunchMode(platform, adapter);
     if (launchMode === "manual_session") {
-      return this.options.manualSessionRunner.run({ accountId, platform, profilePath });
+      return this.options.manualSessionRunner.run({ accountId, platform, profilePath, credentials });
     }
 
     const browserController =
@@ -51,7 +52,7 @@ export class AccountLoginLauncher {
       accountId,
       platform,
       adapter,
-      credentials: this.options.service.getAccountSecrets(accountId),
+      credentials,
       profilePath
     });
   }
